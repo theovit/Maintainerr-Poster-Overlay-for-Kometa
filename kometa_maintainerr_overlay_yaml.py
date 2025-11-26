@@ -170,7 +170,7 @@ class MaintainerrKometaGenerator:
                 
                 time_str, urgency_level = self.get_time_string_and_urgency(time_left, delete_days_rule)
                 
-                # FIX: Use ratingKey instead of GUID for Kometa compatibility
+                # Use ratingKey
                 rating_key = item.get('plexData', {}).get('ratingKey')
                 
                 if time_str and urgency_level and rating_key:
@@ -244,10 +244,14 @@ class MaintainerrKometaGenerator:
             elif urgency == "notice": text_content = f"Leaving: {time_str}"
             else: text_content = f"Deletion: {time_str}"
             
-            # FIX: Use the 'key' builder instead of 'plex_search'
+            # UPDATED: Use 'plex_search' with 'id' instead of raw 'key'
             overlay_def = {
                 "overlay": { "name": f"text({text_content})", **style },
-                "key": keys
+                "plex_search": {
+                    "any": {
+                        "id": keys
+                    }
+                }
             }
             kometa_config["overlays"][safe_key] = overlay_def
             
