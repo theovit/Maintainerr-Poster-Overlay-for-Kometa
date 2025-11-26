@@ -14,28 +14,22 @@ class MaintainerrKometaGenerator:
 
     def setup_logging(self):
         """Sets up logging to both console (clean) and file (detailed)."""
-        # UPDATED LOG FILENAME
         log_file = "kometa_maintainerr_overlay_yaml.log"
         
-        # Create a custom logger
         self.logger = logging.getLogger("MaintainerrOverlay")
         self.logger.setLevel(logging.DEBUG)
         
-        # Create handlers
         c_handler = logging.StreamHandler()
-        f_handler = logging.FileHandler(log_file, mode='w') # 'w' overwrites log each run. Use 'a' to append.
+        f_handler = logging.FileHandler(log_file, mode='w')
         
-        # Set levels
         c_handler.setLevel(logging.INFO)
         f_handler.setLevel(logging.DEBUG)
         
-        # Create formatters and add it to handlers
         c_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
         f_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s')
         c_handler.setFormatter(c_format)
         f_handler.setFormatter(f_format)
         
-        # Add handlers to the logger
         if not self.logger.handlers:
             self.logger.addHandler(c_handler)
             self.logger.addHandler(f_handler)
@@ -59,16 +53,11 @@ class MaintainerrKometaGenerator:
             sys.exit(1)
 
     def validate_config(self):
-        """
-        Strictly checks if the user is still using template/default values.
-        Returns False if defaults are found.
-        """
-        # These are the values found in the default template
+        """Strictly checks if the user is still using template/default values."""
         forbidden_defaults = {
             "maintainerr_pass": "your#secure#password",
             "plex_token": "YOUR_PLEX_TOKEN",
             "yaml_path": "/path/to/kometa/config/overlays/maintainerr_overlays.yml",
-            "maintainerr_user": "admin", 
             "maintainerr_host": "192.168.1.100"
         }
 
@@ -76,16 +65,12 @@ class MaintainerrKometaGenerator:
         connect = self.config.get('connect', {})
         output = self.config.get('output', {})
 
-        # 1. Check Connection Defaults
         for key, default_val in forbidden_defaults.items():
-            # Check in 'connect' block
             if key in connect and connect[key] == default_val:
                 issues.append(f"Config '{key}' is still set to default: '{default_val}'")
-            # Check in 'output' block (specifically for yaml_path)
             if key == "yaml_path" and output.get('yaml_path') == default_val:
                 issues.append(f"Config 'yaml_path' is still set to default: '{default_val}'")
 
-        # 2. Check for missing keys entirely
         required_connect = ['maintainerr_host', 'maintainerr_port', 'maintainerr_user', 'maintainerr_pass']
         for key in required_connect:
             if key not in connect:
@@ -117,25 +102,20 @@ class MaintainerrKometaGenerator:
         return full_url
 
     def run(self):
-        # Pre-flight check
         if not self.validate_config():
             sys.exit(1)
 
         self.logger.info("Starting Maintainerr to Kometa Sync...")
         
-        # 1. Get Collections
         collections = self.get_maintainerr_collections()
         if not collections:
             self.logger.error("No collections found or connection failed.")
             return
 
-        # 2. Process items
         for col in collections:
             self.process_collection(col)
             
-        # 3. Generate YAML
         self.generate_yaml()
-        
         self.logger.info("Sync Complete.")
 
     def get_maintainerr_collections(self):
@@ -160,9 +140,8 @@ class MaintainerrKometaGenerator:
 
         self.logger.debug(f"Processing Collection: '{col_name}' (ID: {col_id}) - Rule: {delete_days_rule} days")
 
-        # Check if deletion rule exists
         if delete_days_rule is None:
-             self.logger.warning(f"Collection '{col_name}' has NO delete rule set. Skipping logic for this collection.")
+             self.logger.warning(f"Collection '{col_name}' has NO delete rule set. Skipping.")
              return
 
         base_url = self.construct_maintainerr_url()
@@ -178,10 +157,8 @@ class MaintainerrKometaGenerator:
 
         for item in data:
             try:
-                # Calculate Delete Date
                 add_date_str = item.get('addDate')
                 if not add_date_str:
-                    self.logger.debug(f"  > Item missing addDate. Skipping.")
                     continue
 
                 add_date = datetime.strptime(add_date_str, '%Y-%m-%dT%H:%M:%S.000Z')
@@ -193,13 +170,17 @@ class MaintainerrKometaGenerator:
                 
                 time_str, urgency_level = self.get_time_string_and_urgency(time_left, delete_days_rule)
                 
-                if time_str and urgency_level:
-                    plex_guid = item['plexData']['guid']
+                # FIX: Use ratingKey instead of GUID for Kometa compatibility
+                rating_key = item.get('plexData', {}).get('ratingKey')
+                
+                if time_str and urgency_level and rating_key:
                     group_key = f"{time_str}|{urgency_level}"
                     
                     if group_key not in self.overlays_data:
                         self.overlays_data[group_key] = []
-                    self.overlays_data[group_key].append(plex_guid)
+                    
+                    # Ensure it's an integer for cleaner YAML
+                    self.overlays_data[group_key].append(int(rating_key))
                 
             except Exception as e:
                 self.logger.error(f"Skipping item in '{col_name}' due to error: {e}", exc_info=True)
@@ -232,16 +213,17 @@ class MaintainerrKometaGenerator:
             return None, None
 
     def generate_yaml(self):
-        output_path = self.config.get('output', {}).get('yaml_path')
+        raw_path = self.config.get('output', {}).get('yaml_path')
         
-        if not output_path:
+        if not raw_path:
              self.logger.critical("No output path defined in config!")
              return
 
-        # Check if we can write there
-        if "/path/to/" in output_path:
-             self.logger.critical("Output path is still set to the default placeholder! Cannot write.")
+        if "/path/to/" in raw_path:
+             self.logger.critical("Output path is default placeholder! Update config.")
              return
+
+        output_path = os.path.abspath(os.path.expanduser(raw_path))
 
         try:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -251,7 +233,7 @@ class MaintainerrKometaGenerator:
         
         kometa_config = {"overlays": {}}
         
-        for group_key, guids in self.overlays_data.items():
+        for group_key, keys in self.overlays_data.items():
             time_str, urgency = group_key.split("|")
             styles = self.config.get('styles', {})
             style = styles.get(urgency, styles.get('notice', {})).copy()
@@ -261,10 +243,11 @@ class MaintainerrKometaGenerator:
             elif urgency == "warning": text_content = f"Leaves in {time_str}"
             elif urgency == "notice": text_content = f"Leaving: {time_str}"
             else: text_content = f"Deletion: {time_str}"
-                
+            
+            # FIX: Use the 'key' builder instead of 'plex_search'
             overlay_def = {
                 "overlay": { "name": f"text({text_content})", **style },
-                "plex_search": { "any": { "guid": guids } }
+                "key": keys
             }
             kometa_config["overlays"][safe_key] = overlay_def
             
