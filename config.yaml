@@ -1,0 +1,69 @@
+connect:
+  maintainerr_url: "http://192.168.1.100:6246"
+  plex_url: "http://192.168.1.100:32400"
+  plex_token: "YOUR_PLEX_TOKEN"
+
+output:
+  # Where Kometa will look for this file
+  yaml_path: "/path/to/kometa/config/overlays/maintainerr_overlays.yml"
+
+triggers:
+  # Days remaining to trigger specific styles
+  critical_days: 3   # Less than 3 days = Critical
+  warning_days: 7    # Less than 7 days = Warning
+  notice_days: 14    # Less than 14 days = Notice
+  
+  # 4TH TRIGGER: Automatic API Limit
+  # If true, items will get the "monitor" style as soon as they enter the Maintainerr collection
+  # (e.g., if the rule is 30 days, this triggers at 30 days).
+  use_maintainerr_limit: true
+
+styles:
+  # 1. CRITICAL (Expires very soon)
+  critical:
+    back_color: "#E50914FF" # Netflix Red
+    font_color: "#FFFFFF"
+    font_size: 65
+    back_radius: 25
+    back_padding: 15
+    horizontal_align: "left"
+    vertical_align: "top"
+    horizontal_offset: 20
+    vertical_offset: 20
+
+  # 2. WARNING (Approaching expiration)
+  warning:
+    back_color: "#FF8800FF" # Bright Orange
+    font_color: "#000000"
+    font_size: 60
+    back_radius: 25
+    back_padding: 15
+    horizontal_align: "left"
+    vertical_align: "top"
+    horizontal_offset: 20
+    vertical_offset: 20
+
+  # 3. NOTICE (Gets closer)
+  notice:
+    back_color: "#00000099" # Semi-transparent Black (Glass)
+    font_color: "#FFFFFF"
+    font_size: 50
+    back_radius: 25
+    back_padding: 15
+    horizontal_align: "left"
+    vertical_align: "top"
+    horizontal_offset: 20
+    vertical_offset: 20
+
+  # 4. MONITOR (Just Added to Collection)
+  # This style applies when 'use_maintainerr_limit' is true
+  monitor:
+    back_color: "#333333CC" # Dark Grey
+    font_color: "#FFFFFF"
+    font_size: 40
+    back_radius: 15
+    back_padding: 10
+    horizontal_align: "right" # Maybe put this one in the corner?
+    vertical_align: "bottom"
+    horizontal_offset: 20
+    vertical_offset: 20
