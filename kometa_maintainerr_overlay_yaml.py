@@ -18,6 +18,7 @@ class MaintainerrKometaGenerator:
         """Load settings from the YAML config file."""
         if not os.path.exists(path):
             logger.critical(f"Config file not found at: {path}")
+            logger.critical("Please create the config file or check the path.")
             sys.exit(1)
         
         try:
@@ -27,12 +28,51 @@ class MaintainerrKometaGenerator:
             logger.critical(f"Failed to parse config file: {e}")
             sys.exit(1)
 
+    def validate_config(self):
+        """Check if the config still has placeholder values."""
+        defaults = [
+            "http://192.168.1.100:6246",
+            "http://192.168.1.100:32400",
+            "YOUR_PLEX_TOKEN"
+        ]
+        
+        issues = []
+        connect = self.config.get('connect', {})
+        
+        if not connect:
+            logger.critical("Config is missing the 'connect' section.")
+            return False
+
+        # Check for default placeholders
+        if connect.get('maintainerr_url') in defaults:
+            issues.append("Maintainerr URL is set to the default placeholder.")
+        if connect.get('plex_url') in defaults:
+            issues.append("Plex URL is set to the default placeholder.")
+        if connect.get('plex_token') in defaults:
+            issues.append("Plex Token is set to the default placeholder.")
+            
+        if issues:
+            logger.critical("CONFIGURATION ERROR: It looks like you haven't updated 'config.yaml' yet.")
+            for issue in issues:
+                logger.error(f"  - {issue}")
+            logger.info("Please open 'config.yaml' and enter your actual server details.")
+            return False
+        return True
+
     def run(self):
+        # Pre-flight check
+        if not self.validate_config():
+            sys.exit(1)
+
         logger.info("Starting Maintainerr to Kometa Sync...")
         
         # 1. Get Collections from Maintainerr
         collections = self.get_maintainerr_collections()
         
+        if not collections:
+            logger.error("No collections found or could not connect. Exiting.")
+            return
+
         # 2. Process items
         for col in collections:
             self.process_collection(col)
@@ -44,14 +84,33 @@ class MaintainerrKometaGenerator:
 
     def get_maintainerr_collections(self):
         """Fetch all collections from Maintainerr"""
-        base_url = self.config['connect']['maintainerr_url'].rstrip('/')
+        maintainerr_url = self.config['connect'].get('maintainerr_url', '')
+        
+        if not maintainerr_url:
+            logger.critical("Maintainerr URL is missing in config.")
+            return []
+
+        base_url = maintainerr_url.rstrip('/')
         url = f"{base_url}/api/collections"
+        
+        logger.info(f"Connecting to Maintainerr at: {url}")
+        
         try:
-            response = requests.get(url)
+            # Added timeout=10 to prevent hanging forever
+            response = requests.get(url, timeout=10)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.MissingSchema:
+            logger.critical(f"Invalid URL format: '{maintainerr_url}'. Make sure to include 'http://' or 'https://'.")
+            return []
+        except requests.exceptions.ConnectTimeout:
+            logger.critical(f"Connection timed out connecting to {url}. Check your IP and Port.")
+            return []
+        except requests.exceptions.ConnectionError:
+            logger.critical(f"Failed to connect to {url}. The server might be down or the URL is wrong.")
+            return []
         except Exception as e:
-            logger.error(f"Failed to connect to Maintainerr: {e}")
+            logger.error(f"Unexpected error connecting to Maintainerr: {e}")
             return []
 
     def process_collection(self, collection):
@@ -64,7 +123,7 @@ class MaintainerrKometaGenerator:
         url = f"{base_url}/api/collections/media/{col_id}/content/1?size=1000"
         
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=10)
             data = response.json().get('items', [])
         except Exception as e:
             logger.error(f"Error fetching items for collection {col_id}: {e}")
@@ -81,18 +140,14 @@ class MaintainerrKometaGenerator:
                 time_left = delete_date - now
                 
                 # Generate the "Label" (e.g., "5 Days", "12 Hours")
-                # We pass the collection's rule so we can check against the 4th trigger
                 time_str, urgency_level = self.get_time_string_and_urgency(time_left, delete_days_rule)
                 
-                # If urgency is None, it means we are outside all trigger windows
                 if time_str is None or urgency_level is None:
                     continue
 
                 # We use the Plex GUID for robust matching in Kometa
                 plex_guid = item['plexData']['guid']
                 
-                # Add to our grouping dictionary
-                # Key = "5 Days|critical" (We combine them to ensure uniqueness in grouping)
                 group_key = f"{time_str}|{urgency_level}"
                 
                 if group_key not in self.overlays_data:
@@ -111,14 +166,13 @@ class MaintainerrKometaGenerator:
         days = delta.days
         hours = round(delta.seconds / 3600)
         
-        crit_days = self.config['triggers']['critical_days']
-        warn_days = self.config['triggers']['warning_days']
-        notice_days = self.config['triggers']['notice_days']
-        use_limit = self.config['triggers'].get('use_maintainerr_limit', False)
+        triggers = self.config.get('triggers', {})
+        crit_days = triggers.get('critical_days', 3)
+        warn_days = triggers.get('warning_days', 7)
+        notice_days = triggers.get('notice_days', 14)
+        use_limit = triggers.get('use_maintainerr_limit', False)
 
         # Determine Label and Urgency
-        # Priority: Critical -> Warning -> Notice -> Monitor
-        
         if days < 1:
             if hours <= 1:
                 return "< 1 Hour", "critical"
@@ -130,14 +184,17 @@ class MaintainerrKometaGenerator:
         elif days <= notice_days:
             return f"{days} Days", "notice"
         elif use_limit and days <= collection_limit_days:
-            # This is the 4th trigger: Item is within the collection's lifespan
             return f"{days} Days", "monitor"
         else:
-            # Item hasn't hit any visual trigger yet
             return None, None
 
     def generate_yaml(self):
         """Writes the gathered data into a Kometa-compatible YAML file"""
+        
+        if not self.overlays_data:
+            logger.warning("No items found to overlay. YAML file will be empty (or unchanged).")
+            # Depending on preference, you might want to write an empty file to clear old overlays
+            # For now, we will proceed to write an empty config to clear any "stuck" overlays.
         
         kometa_config = {"overlays": {}}
         output_path = self.config['output']['yaml_path']
@@ -145,14 +202,12 @@ class MaintainerrKometaGenerator:
         for group_key, guids in self.overlays_data.items():
             time_str, urgency = group_key.split("|")
             
-            # Select the correct style template from config
-            # Default to 'notice' if something weird happens
-            style = self.config['styles'].get(urgency, self.config['styles']['notice']).copy()
+            styles = self.config.get('styles', {})
+            style = styles.get(urgency, styles.get('notice', {})).copy()
             
             # Sanitize the key name for YAML (e.g., "maintainerr_5_days")
             safe_key = f"maintainerr_{time_str.replace(' ', '_').replace('<', 'less').lower()}"
             
-            # Define the Overlay Text Prefix based on urgency
             if urgency == "critical":
                 text_content = f"EXPIRING: {time_str}"
             elif urgency == "warning":
@@ -160,29 +215,24 @@ class MaintainerrKometaGenerator:
             elif urgency == "notice":
                 text_content = f"Leaving: {time_str}"
             else:
-                # Monitor / Default text
                 text_content = f"Deletion: {time_str}"
                 
-            # Build the Kometa Block
             overlay_def = {
                 "overlay": {
                     "name": f"text({text_content})",
-                    **style  # Unpack selected style settings
+                    **style
                 },
                 "plex_search": {
                     "any": {
-                        "guid": guids # List of Plex GUIDs to match
+                        "guid": guids
                     }
                 }
             }
             
             kometa_config["overlays"][safe_key] = overlay_def
             
-        # Write to file
         try:
-            # Ensure directory exists
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            
             with open(output_path, 'w') as f:
                 f.write("# Generated by Maintainerr-Kometa Script\n")
                 f.write(f"# Generated at: {datetime.now()}\n")
@@ -193,7 +243,11 @@ class MaintainerrKometaGenerator:
             logger.error(f"Failed to write YAML file: {e}")
 
 if __name__ == "__main__":
-    # Optional: Pass config path as argument, otherwise defaults to config.yaml
     config_file = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
     generator = MaintainerrKometaGenerator(config_file)
-    generator.run()
+    
+    try:
+        generator.run()
+    except KeyboardInterrupt:
+        print("\n[!] Script cancelled by user.")
+        sys.exit(0)
