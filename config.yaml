@@ -1,5 +1,13 @@
 connect:
-  maintainerr_url: "http://192.168.1.100:6246"
+  # Host can be an IP or domain (e.g., 192.168.1.100 or myseedbox.com)
+  maintainerr_host: "192.168.1.100"
+  maintainerr_port: 6246
+  
+  # Credentials
+  maintainerr_user: "admin"
+  maintainerr_pass: "your#secure#password"
+  
+  # Plex details remain the same
   plex_url: "http://192.168.1.100:32400"
   plex_token: "YOUR_PLEX_TOKEN"
 

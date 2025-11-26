@@ -4,6 +4,7 @@ import os
 import yaml
 import logging
 import sys
+from urllib.parse import quote  # Import for URL encoding
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -29,11 +30,11 @@ class MaintainerrKometaGenerator:
             sys.exit(1)
 
     def validate_config(self):
-        """Check if the config still has placeholder values."""
+        """Check if the config has the required new fields."""
         defaults = [
-            "http://192.168.1.100:6246",
-            "http://192.168.1.100:32400",
-            "YOUR_PLEX_TOKEN"
+            "YOUR_PLEX_TOKEN",
+            "your#secure#password",
+            "admin"
         ]
         
         issues = []
@@ -43,13 +44,17 @@ class MaintainerrKometaGenerator:
             logger.critical("Config is missing the 'connect' section.")
             return False
 
+        # Check for missing keys
+        required_keys = ['maintainerr_host', 'maintainerr_port', 'maintainerr_user', 'maintainerr_pass']
+        for key in required_keys:
+            if key not in connect:
+                issues.append(f"Missing config key: {key}")
+
         # Check for default placeholders
-        if connect.get('maintainerr_url') in defaults:
-            issues.append("Maintainerr URL is set to the default placeholder.")
-        if connect.get('plex_url') in defaults:
-            issues.append("Plex URL is set to the default placeholder.")
         if connect.get('plex_token') in defaults:
             issues.append("Plex Token is set to the default placeholder.")
+        if connect.get('maintainerr_pass') in defaults:
+            issues.append("Maintainerr Password appears to be default.")
             
         if issues:
             logger.critical("CONFIGURATION ERROR: It looks like you haven't updated 'config.yaml' yet.")
@@ -58,6 +63,29 @@ class MaintainerrKometaGenerator:
             logger.info("Please open 'config.yaml' and enter your actual server details.")
             return False
         return True
+
+    def construct_maintainerr_url(self):
+        """
+        Constructs the full authenticated URL: http://user:pass@host:port
+        Encodes special characters in user/pass (e.g., # becomes %23).
+        """
+        c = self.config['connect']
+        
+        # 1. Get raw values
+        raw_user = str(c.get('maintainerr_user', ''))
+        raw_pass = str(c.get('maintainerr_pass', ''))
+        raw_host = str(c.get('maintainerr_host', '')).replace('http://', '').replace('https://', '').strip('/')
+        raw_port = str(c.get('maintainerr_port', ''))
+
+        # 2. URL Encode User and Password (safe='' ensures symbols like / are also encoded)
+        safe_user = quote(raw_user, safe='')
+        safe_pass = quote(raw_pass, safe='')
+
+        # 3. Construct URL
+        # Format: http://username:password@host:port
+        full_url = f"http://{safe_user}:{safe_pass}@{raw_host}:{raw_port}"
+        
+        return full_url
 
     def run(self):
         # Pre-flight check
@@ -84,30 +112,24 @@ class MaintainerrKometaGenerator:
 
     def get_maintainerr_collections(self):
         """Fetch all collections from Maintainerr"""
-        maintainerr_url = self.config['connect'].get('maintainerr_url', '')
         
-        if not maintainerr_url:
-            logger.critical("Maintainerr URL is missing in config.")
-            return []
-
-        base_url = maintainerr_url.rstrip('/')
+        # Construct the URL with credentials
+        base_url = self.construct_maintainerr_url()
         url = f"{base_url}/api/collections"
         
-        logger.info(f"Connecting to Maintainerr at: {url}")
+        # Log the connection (masking password for security in logs)
+        masked_url = url.split('@')[-1]
+        logger.info(f"Connecting to Maintainerr at: http://***:***@{masked_url}")
         
         try:
-            # Added timeout=10 to prevent hanging forever
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             return response.json()
-        except requests.exceptions.MissingSchema:
-            logger.critical(f"Invalid URL format: '{maintainerr_url}'. Make sure to include 'http://' or 'https://'.")
-            return []
         except requests.exceptions.ConnectTimeout:
-            logger.critical(f"Connection timed out connecting to {url}. Check your IP and Port.")
+            logger.critical(f"Connection timed out. Check IP and Port.")
             return []
         except requests.exceptions.ConnectionError:
-            logger.critical(f"Failed to connect to {url}. The server might be down or the URL is wrong.")
+            logger.critical(f"Failed to connect. The server might be down or credentials are wrong.")
             return []
         except Exception as e:
             logger.error(f"Unexpected error connecting to Maintainerr: {e}")
@@ -117,7 +139,9 @@ class MaintainerrKometaGenerator:
         """Get items for a specific collection and calculate remaining time"""
         col_id = collection['id']
         delete_days_rule = collection['deleteAfterDays']
-        base_url = self.config['connect']['maintainerr_url'].rstrip('/')
+        
+        # Construct the URL with credentials
+        base_url = self.construct_maintainerr_url()
         
         # API to get items in this collection
         url = f"{base_url}/api/collections/media/{col_id}/content/1?size=1000"
@@ -193,8 +217,6 @@ class MaintainerrKometaGenerator:
         
         if not self.overlays_data:
             logger.warning("No items found to overlay. YAML file will be empty (or unchanged).")
-            # Depending on preference, you might want to write an empty file to clear old overlays
-            # For now, we will proceed to write an empty config to clear any "stuck" overlays.
         
         kometa_config = {"overlays": {}}
         output_path = self.config['output']['yaml_path']
