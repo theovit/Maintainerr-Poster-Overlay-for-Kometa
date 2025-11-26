@@ -1,90 +1,119 @@
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import yaml
 import logging
 import sys
-from urllib.parse import quote  # Import for URL encoding
-
-# Setup Logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-logger = logging.getLogger(__name__)
+from urllib.parse import quote
 
 class MaintainerrKometaGenerator:
     def __init__(self, config_path="config.yaml"):
+        self.setup_logging()
         self.config = self.load_config(config_path)
-        self.overlays_data = {}  # Dictionary to hold our groups
+        self.overlays_data = {}
+
+    def setup_logging(self):
+        """Sets up logging to both console (clean) and file (detailed)."""
+        # UPDATED LOG FILENAME
+        log_file = "kometa_maintainerr_overlay_yaml.log"
+        
+        # Create a custom logger
+        self.logger = logging.getLogger("MaintainerrOverlay")
+        self.logger.setLevel(logging.DEBUG)
+        
+        # Create handlers
+        c_handler = logging.StreamHandler()
+        f_handler = logging.FileHandler(log_file, mode='w') # 'w' overwrites log each run. Use 'a' to append.
+        
+        # Set levels
+        c_handler.setLevel(logging.INFO)
+        f_handler.setLevel(logging.DEBUG)
+        
+        # Create formatters and add it to handlers
+        c_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+        f_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s')
+        c_handler.setFormatter(c_format)
+        f_handler.setFormatter(f_format)
+        
+        # Add handlers to the logger
+        if not self.logger.handlers:
+            self.logger.addHandler(c_handler)
+            self.logger.addHandler(f_handler)
+            
+        self.logger.info(f"Logging initialized. Debug logs writing to: {log_file}")
 
     def load_config(self, path):
         """Load settings from the YAML config file."""
         if not os.path.exists(path):
-            logger.critical(f"Config file not found at: {path}")
-            logger.critical("Please create the config file or check the path.")
+            self.logger.critical(f"Config file not found at: {path}")
+            self.logger.critical("Please create the config file.")
             sys.exit(1)
         
         try:
             with open(path, 'r') as f:
-                return yaml.safe_load(f)
+                config = yaml.safe_load(f)
+                self.logger.debug(f"Config loaded successfully from {path}")
+                return config
         except Exception as e:
-            logger.critical(f"Failed to parse config file: {e}")
+            self.logger.critical(f"Failed to parse config file: {e}")
             sys.exit(1)
 
     def validate_config(self):
-        """Check if the config has the required new fields."""
-        defaults = [
-            "YOUR_PLEX_TOKEN",
-            "your#secure#password",
-            "admin"
-        ]
-        
+        """
+        Strictly checks if the user is still using template/default values.
+        Returns False if defaults are found.
+        """
+        # These are the values found in the default template
+        forbidden_defaults = {
+            "maintainerr_pass": "your#secure#password",
+            "plex_token": "YOUR_PLEX_TOKEN",
+            "yaml_path": "/path/to/kometa/config/overlays/maintainerr_overlays.yml",
+            "maintainerr_user": "admin", 
+            "maintainerr_host": "192.168.1.100"
+        }
+
         issues = []
         connect = self.config.get('connect', {})
-        
-        if not connect:
-            logger.critical("Config is missing the 'connect' section.")
-            return False
+        output = self.config.get('output', {})
 
-        # Check for missing keys
-        required_keys = ['maintainerr_host', 'maintainerr_port', 'maintainerr_user', 'maintainerr_pass']
-        for key in required_keys:
+        # 1. Check Connection Defaults
+        for key, default_val in forbidden_defaults.items():
+            # Check in 'connect' block
+            if key in connect and connect[key] == default_val:
+                issues.append(f"Config '{key}' is still set to default: '{default_val}'")
+            # Check in 'output' block (specifically for yaml_path)
+            if key == "yaml_path" and output.get('yaml_path') == default_val:
+                issues.append(f"Config 'yaml_path' is still set to default: '{default_val}'")
+
+        # 2. Check for missing keys entirely
+        required_connect = ['maintainerr_host', 'maintainerr_port', 'maintainerr_user', 'maintainerr_pass']
+        for key in required_connect:
             if key not in connect:
-                issues.append(f"Missing config key: {key}")
+                issues.append(f"Missing required key in 'connect' section: {key}")
 
-        # Check for default placeholders
-        if connect.get('plex_token') in defaults:
-            issues.append("Plex Token is set to the default placeholder.")
-        if connect.get('maintainerr_pass') in defaults:
-            issues.append("Maintainerr Password appears to be default.")
-            
         if issues:
-            logger.critical("CONFIGURATION ERROR: It looks like you haven't updated 'config.yaml' yet.")
+            self.logger.critical("Configuration Validation Failed! You must update 'config.yaml'.")
             for issue in issues:
-                logger.error(f"  - {issue}")
-            logger.info("Please open 'config.yaml' and enter your actual server details.")
+                self.logger.error(f"  [!] {issue}")
             return False
+            
+        self.logger.info("Configuration passed validation checks.")
         return True
 
     def construct_maintainerr_url(self):
-        """
-        Constructs the full authenticated URL: http://user:pass@host:port
-        Encodes special characters in user/pass (e.g., # becomes %23).
-        """
+        """Constructs the full authenticated URL."""
         c = self.config['connect']
         
-        # 1. Get raw values
         raw_user = str(c.get('maintainerr_user', ''))
         raw_pass = str(c.get('maintainerr_pass', ''))
         raw_host = str(c.get('maintainerr_host', '')).replace('http://', '').replace('https://', '').strip('/')
         raw_port = str(c.get('maintainerr_port', ''))
 
-        # 2. URL Encode User and Password (safe='' ensures symbols like / are also encoded)
         safe_user = quote(raw_user, safe='')
         safe_pass = quote(raw_pass, safe='')
 
-        # 3. Construct URL
-        # Format: http://username:password@host:port
         full_url = f"http://{safe_user}:{safe_pass}@{raw_host}:{raw_port}"
-        
+        self.logger.debug(f"Constructed URL: http://{safe_user}:***@{raw_host}:{raw_port}")
         return full_url
 
     def run(self):
@@ -92,13 +121,12 @@ class MaintainerrKometaGenerator:
         if not self.validate_config():
             sys.exit(1)
 
-        logger.info("Starting Maintainerr to Kometa Sync...")
+        self.logger.info("Starting Maintainerr to Kometa Sync...")
         
-        # 1. Get Collections from Maintainerr
+        # 1. Get Collections
         collections = self.get_maintainerr_collections()
-        
         if not collections:
-            logger.error("No collections found or could not connect. Exiting.")
+            self.logger.error("No collections found or connection failed.")
             return
 
         # 2. Process items
@@ -108,85 +136,75 @@ class MaintainerrKometaGenerator:
         # 3. Generate YAML
         self.generate_yaml()
         
-        logger.info("Sync Complete.")
+        self.logger.info("Sync Complete.")
 
     def get_maintainerr_collections(self):
-        """Fetch all collections from Maintainerr"""
-        
-        # Construct the URL with credentials
         base_url = self.construct_maintainerr_url()
         url = f"{base_url}/api/collections"
         
-        # Log the connection (masking password for security in logs)
-        masked_url = url.split('@')[-1]
-        logger.info(f"Connecting to Maintainerr at: http://***:***@{masked_url}")
-        
         try:
-            response = requests.get(url, timeout=10)
+            self.logger.debug(f"Fetching collections from: {url}")
+            response = requests.get(url, timeout=30)
             response.raise_for_status()
-            return response.json()
-        except requests.exceptions.ConnectTimeout:
-            logger.critical(f"Connection timed out. Check IP and Port.")
-            return []
-        except requests.exceptions.ConnectionError:
-            logger.critical(f"Failed to connect. The server might be down or credentials are wrong.")
-            return []
+            data = response.json()
+            self.logger.info(f"Successfully retrieved {len(data)} collections from Maintainerr.")
+            return data
         except Exception as e:
-            logger.error(f"Unexpected error connecting to Maintainerr: {e}")
+            self.logger.error(f"Error connecting to Maintainerr: {e}")
             return []
 
     def process_collection(self, collection):
-        """Get items for a specific collection and calculate remaining time"""
-        col_id = collection['id']
-        delete_days_rule = collection['deleteAfterDays']
-        
-        # Construct the URL with credentials
+        col_id = collection.get('id')
+        col_name = collection.get('name', 'Unknown')
+        delete_days_rule = collection.get('deleteAfterDays')
+
+        self.logger.debug(f"Processing Collection: '{col_name}' (ID: {col_id}) - Rule: {delete_days_rule} days")
+
+        # Check if deletion rule exists
+        if delete_days_rule is None:
+             self.logger.warning(f"Collection '{col_name}' has NO delete rule set. Skipping logic for this collection.")
+             return
+
         base_url = self.construct_maintainerr_url()
-        
-        # API to get items in this collection
         url = f"{base_url}/api/collections/media/{col_id}/content/1?size=1000"
         
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, timeout=30)
             data = response.json().get('items', [])
+            self.logger.debug(f"  > Found {len(data)} items in collection '{col_name}'")
         except Exception as e:
-            logger.error(f"Error fetching items for collection {col_id}: {e}")
+            self.logger.error(f"Error fetching items for collection {col_id}: {e}")
             return
 
         for item in data:
             try:
                 # Calculate Delete Date
-                add_date = datetime.strptime(item['addDate'], '%Y-%m-%dT%H:%M:%S.000Z')
-                delete_date = add_date + timedelta(days=delete_days_rule)
-                
-                # Normalize to midnight for cleaner math
-                now = datetime.utcnow()
-                time_left = delete_date - now
-                
-                # Generate the "Label" (e.g., "5 Days", "12 Hours")
-                time_str, urgency_level = self.get_time_string_and_urgency(time_left, delete_days_rule)
-                
-                if time_str is None or urgency_level is None:
+                add_date_str = item.get('addDate')
+                if not add_date_str:
+                    self.logger.debug(f"  > Item missing addDate. Skipping.")
                     continue
 
-                # We use the Plex GUID for robust matching in Kometa
-                plex_guid = item['plexData']['guid']
+                add_date = datetime.strptime(add_date_str, '%Y-%m-%dT%H:%M:%S.000Z')
+                add_date = add_date.replace(tzinfo=timezone.utc)
                 
-                group_key = f"{time_str}|{urgency_level}"
+                delete_date = add_date + timedelta(days=delete_days_rule)
+                now = datetime.now(timezone.utc)
+                time_left = delete_date - now
                 
-                if group_key not in self.overlays_data:
-                    self.overlays_data[group_key] = []
+                time_str, urgency_level = self.get_time_string_and_urgency(time_left, delete_days_rule)
                 
-                self.overlays_data[group_key].append(plex_guid)
+                if time_str and urgency_level:
+                    plex_guid = item['plexData']['guid']
+                    group_key = f"{time_str}|{urgency_level}"
+                    
+                    if group_key not in self.overlays_data:
+                        self.overlays_data[group_key] = []
+                    self.overlays_data[group_key].append(plex_guid)
                 
             except Exception as e:
-                logger.error(f"Skipping item due to error: {e}")
+                self.logger.error(f"Skipping item in '{col_name}' due to error: {e}", exc_info=True)
 
     def get_time_string_and_urgency(self, delta, collection_limit_days):
-        """
-        Converts a timedelta into a clean string and an urgency level.
-        Uses triggers from config file.
-        """
         days = delta.days
         hours = round(delta.seconds / 3600)
         
@@ -196,7 +214,8 @@ class MaintainerrKometaGenerator:
         notice_days = triggers.get('notice_days', 14)
         use_limit = triggers.get('use_maintainerr_limit', False)
 
-        # Determine Label and Urgency
+        if days < 0:
+             return "Expiring", "critical"
         if days < 1:
             if hours <= 1:
                 return "< 1 Hour", "critical"
@@ -213,56 +232,50 @@ class MaintainerrKometaGenerator:
             return None, None
 
     def generate_yaml(self):
-        """Writes the gathered data into a Kometa-compatible YAML file"""
+        output_path = self.config.get('output', {}).get('yaml_path')
         
-        if not self.overlays_data:
-            logger.warning("No items found to overlay. YAML file will be empty (or unchanged).")
+        if not output_path:
+             self.logger.critical("No output path defined in config!")
+             return
+
+        # Check if we can write there
+        if "/path/to/" in output_path:
+             self.logger.critical("Output path is still set to the default placeholder! Cannot write.")
+             return
+
+        try:
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        except OSError as e:
+            self.logger.error(f"Could not create directory for output path '{output_path}': {e}")
+            return
         
         kometa_config = {"overlays": {}}
-        output_path = self.config['output']['yaml_path']
         
         for group_key, guids in self.overlays_data.items():
             time_str, urgency = group_key.split("|")
-            
             styles = self.config.get('styles', {})
             style = styles.get(urgency, styles.get('notice', {})).copy()
-            
-            # Sanitize the key name for YAML (e.g., "maintainerr_5_days")
             safe_key = f"maintainerr_{time_str.replace(' ', '_').replace('<', 'less').lower()}"
             
-            if urgency == "critical":
-                text_content = f"EXPIRING: {time_str}"
-            elif urgency == "warning":
-                text_content = f"Leaves in {time_str}"
-            elif urgency == "notice":
-                text_content = f"Leaving: {time_str}"
-            else:
-                text_content = f"Deletion: {time_str}"
+            if urgency == "critical": text_content = f"EXPIRING: {time_str}"
+            elif urgency == "warning": text_content = f"Leaves in {time_str}"
+            elif urgency == "notice": text_content = f"Leaving: {time_str}"
+            else: text_content = f"Deletion: {time_str}"
                 
             overlay_def = {
-                "overlay": {
-                    "name": f"text({text_content})",
-                    **style
-                },
-                "plex_search": {
-                    "any": {
-                        "guid": guids
-                    }
-                }
+                "overlay": { "name": f"text({text_content})", **style },
+                "plex_search": { "any": { "guid": guids } }
             }
-            
             kometa_config["overlays"][safe_key] = overlay_def
             
         try:
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
             with open(output_path, 'w') as f:
                 f.write("# Generated by Maintainerr-Kometa Script\n")
                 f.write(f"# Generated at: {datetime.now()}\n")
-                f.write("# Do not edit manually; this file is overwritten on schedule.\n\n")
                 yaml.dump(kometa_config, f, sort_keys=False)
-            logger.info(f"Successfully wrote YAML to {output_path}")
+            self.logger.info(f"Successfully wrote YAML to {output_path}")
         except Exception as e:
-            logger.error(f"Failed to write YAML file: {e}")
+            self.logger.error(f"Failed to write YAML file: {e}")
 
 if __name__ == "__main__":
     config_file = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
