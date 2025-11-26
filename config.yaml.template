@@ -1,78 +1,91 @@
 connect:
-  # Host can be an IP or domain (e.g., 192.168.1.100 or myseedbox.com)
   maintainerr_host: "192.168.1.100"
   maintainerr_port: 6246
-  
-  # Credentials
   maintainerr_user: "admin"
   maintainerr_pass: "your#secure#password"
-  
-  # Plex details remain the same
   plex_url: "http://192.168.1.100:32400"
   plex_token: "YOUR_PLEX_TOKEN"
 
 output:
-  # SEPARATE PATHS FOR MOVIES AND SHOWS
-  movies_path: "/path/to/kometa/config/overlays/maintainerr_overlays_movies.yaml"
-  shows_path: "/path/to/kometa/config/overlays/maintainerr_overlays_shows.yaml"
+  movies_path: "/home32/northmainave/scripts/kometa/config/overlays/maintainerr_overlays_movies.yaml"
+  shows_path: "/home32/northmainave/scripts/kometa/config/overlays/maintainerr_overlays_shows.yaml"
 
 triggers:
-  # Days remaining to trigger specific styles
-  critical_days: 3   # Less than 3 days = Critical
-  warning_days: 7    # Less than 7 days = Warning
-  notice_days: 14    # Less than 14 days = Notice
-  
-  # 4TH TRIGGER: Automatic API Limit
-  # If true, items will get the "monitor" style as soon as they enter the Maintainerr collection
-  # (e.g., if the rule is 30 days, this triggers at 30 days).
+  critical_days: 3
+  warning_days: 7
+  notice_days: 14
   use_maintainerr_limit: true
 
+# =======================================================
+#  GLOBAL DEFAULTS
+#  These apply if the specific settings below are empty (~).
+# =======================================================
+global_defaults:
+  text: "Leaving In: {time}"
+  font_size: 80
+  font_color: "#FFFFFF"
+  back_color: "#00000099"
+  back_radius: 25
+  back_padding: 15
+  horizontal_align: "right"
+  vertical_align: "bottom"
+  horizontal_offset: 20
+  vertical_offset: 50
+
+# =======================================================
+#  SPECIFIC STYLES
+#  Any setting set to ~ (null) will use the Global Default above.
+#  Fill them in to override the default for that specific style.
+# =======================================================
 styles:
-  # 1. CRITICAL (Expires very soon)
+  # 1. CRITICAL
   critical:
+    text: ~
+    font_size: ~
+    font_color: "#FFFFFF"
     back_color: "#E50914FF" # Netflix Red
-    font_color: "#FFFFFF"
-    font_size: 65
-    back_radius: 25
-    back_padding: 15
-    horizontal_align: "left"
-    vertical_align: "top"
-    horizontal_offset: 20
-    vertical_offset: 20
+    back_radius: ~
+    back_padding: ~
+    horizontal_align: ~
+    vertical_align: ~
+    horizontal_offset: ~
+    vertical_offset: ~
 
-  # 2. WARNING (Approaching expiration)
+  # 2. WARNING
   warning:
-    back_color: "#FF8800FF" # Bright Orange
+    text: ~
+    font_size: ~
     font_color: "#000000"
-    font_size: 60
-    back_radius: 25
-    back_padding: 15
-    horizontal_align: "left"
-    vertical_align: "top"
-    horizontal_offset: 20
-    vertical_offset: 20
+    back_color: "#FF8800FF" # Bright Orange
+    back_radius: ~
+    back_padding: ~
+    horizontal_align: ~
+    vertical_align: ~
+    horizontal_offset: ~
+    vertical_offset: ~
 
-  # 3. NOTICE (Gets closer)
+  # 3. NOTICE
   notice:
-    back_color: "#00000099" # Semi-transparent Black (Glass)
+    text: ~
+    font_size: ~
     font_color: "#FFFFFF"
-    font_size: 50
-    back_radius: 25
-    back_padding: 15
-    horizontal_align: "left"
-    vertical_align: "top"
-    horizontal_offset: 20
-    vertical_offset: 20
-
-  # 4. MONITOR (Just Added to Collection)
-  # This style applies when 'use_maintainerr_limit' is true
-  monitor:
     back_color: "#333333CC" # Dark Grey
+    back_radius: ~
+    back_padding: ~
+    horizontal_align: ~
+    vertical_align: ~
+    horizontal_offset: ~
+    vertical_offset: ~
+
+  # 4. MONITOR
+  monitor:
+    text: ~
+    font_size: ~
     font_color: "#FFFFFF"
-    font_size: 40
-    back_radius: 15
-    back_padding: 10
-    horizontal_align: "right" # Maybe put this one in the corner?
-    vertical_align: "bottom"
-    horizontal_offset: 20
-    vertical_offset: 20
+    back_color: "#00000099" # Semi-transparent Black (Glass)
+    back_radius: ~
+    back_padding: ~
+    horizontal_align: ~
+    vertical_align: ~
+    horizontal_offset: ~
+    vertical_offset: ~

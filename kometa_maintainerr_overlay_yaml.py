@@ -58,7 +58,6 @@ class MaintainerrKometaGenerator:
                 self.logger.critical(f"Missing required key in 'connect' section: {key}")
                 return False
 
-        # Check output paths
         if not output.get('movies_path') or not output.get('shows_path'):
              self.logger.critical("Missing 'movies_path' or 'shows_path' in 'output' section of config.")
              return False
@@ -104,18 +103,15 @@ class MaintainerrKometaGenerator:
             return []
 
     def get_external_id(self, item):
-        # 1. Explicit fields
         if item.get('tmdbId'): return 'tmdb', item['tmdbId']
         if item.get('tvdbId'): return 'tvdb', item['tvdbId']
 
-        # 2. Plex GUIDs
         plex_data = item.get('plexData', {})
         for guid_entry in plex_data.get('guids', []):
             guid_id = guid_entry.get('id', '')
             if guid_id.startswith('tmdb://'): return 'tmdb', int(guid_id.split('//')[1])
             if guid_id.startswith('tvdb://'): return 'tvdb', int(guid_id.split('//')[1])
 
-        # 3. Main GUID fallback
         main_guid = plex_data.get('guid', '')
         if 'tmdb-' in main_guid:
             try: return 'tmdb', int(main_guid.split('tmdb-')[1].split('?')[0].split('/')[0])
@@ -162,7 +158,6 @@ class MaintainerrKometaGenerator:
 
                 group_key = f"{time_str}|{urgency_level}"
                 
-                # Split into separate buckets
                 if media_type == 'movie':
                     if group_key not in self.overlays_data_movies:
                         self.overlays_data_movies[group_key] = {'tmdb_movie': []}
@@ -193,8 +188,30 @@ class MaintainerrKometaGenerator:
         elif triggers.get('use_maintainerr_limit', False) and days <= collection_limit_days: return f"{days} Days", "monitor"
         else: return None, None
 
+    def get_merged_style(self, urgency, time_str):
+        """
+        Merges global defaults with specific style config.
+        Only overrides if specific value is NOT None (~) and NOT empty.
+        """
+        final_style = self.config.get('global_defaults', {}).copy()
+        specific = self.config.get('styles', {}).get(urgency, {})
+        
+        # Override defaults only if specific value exists
+        for key, val in specific.items():
+            if val is not None and val != "":
+                final_style[key] = val
+        
+        # Handle Text Replacement
+        text_template = final_style.get('text', 'Deletion: {time}')
+        final_text = text_template.replace('{time}', time_str)
+        
+        # Remove 'text' key as Kometa uses 'name'
+        if 'text' in final_style:
+            del final_style['text']
+            
+        return f"text({final_text})", final_style
+
     def write_single_file(self, file_path_key, data_dict):
-        """Helper to write a dictionary to a YAML file defined in config."""
         output_path = self.config.get('output', {}).get(file_path_key)
         
         if not output_path or "/path/to/" in output_path:
@@ -210,18 +227,13 @@ class MaintainerrKometaGenerator:
             
             for group_key, buckets in data_dict.items():
                 time_str, urgency = group_key.split("|")
-                styles = self.config.get('styles', {})
-                style = styles.get(urgency, styles.get('notice', {})).copy()
+                
+                overlay_name, style_dict = self.get_merged_style(urgency, time_str)
+                
                 safe_key = f"maintainerr_{time_str.replace(' ', '_').replace('<', 'less').lower()}"
                 
-                if urgency == "critical": text_content = f"EXPIRING: {time_str}"
-                elif urgency == "warning": text_content = f"Leaves in {time_str}"
-                elif urgency == "notice": text_content = f"Leaving: {time_str}"
-                else: text_content = f"Deletion: {time_str}"
+                overlay_def = { "overlay": { "name": overlay_name, **style_dict } }
                 
-                overlay_def = { "overlay": { "name": f"text({text_content})", **style } }
-                
-                # Add only non-empty builders
                 has_items = False
                 for builder, ids in buckets.items():
                     if ids: 
@@ -240,10 +252,7 @@ class MaintainerrKometaGenerator:
             self.logger.error(f"Failed to write {output_path}: {e}")
 
     def generate_yaml(self):
-        # Write Movies File
         self.write_single_file("movies_path", self.overlays_data_movies)
-        
-        # Write Shows File
         self.write_single_file("shows_path", self.overlays_data_shows)
 
 if __name__ == "__main__":
