@@ -12,9 +12,6 @@ connect:
   plex_token: "YOUR_PLEX_TOKEN"
 
 output:
-  # Where Kometa will look for this file
-  yaml_path: "/path/to/kometa/config/overlays/maintainerr_overlays.yml"
-output:
   # SEPARATE PATHS FOR MOVIES AND SHOWS
   movies_path: "/path/to/kometa/config/overlays/maintainerr_overlays_movies.yaml"
   shows_path: "/path/to/kometa/config/overlays/maintainerr_overlays_shows.yaml"
