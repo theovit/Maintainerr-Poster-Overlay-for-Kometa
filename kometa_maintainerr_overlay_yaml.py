@@ -4,13 +4,14 @@ import os
 import yaml
 import logging
 import sys
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
 class MaintainerrKometaGenerator:
     def __init__(self, config_path="config.yaml"):
         self.setup_logging()
         self.config = self.load_config(config_path)
-        self.overlays_data = {}
+        self.overlays_data_movies = {}
+        self.overlays_data_shows = {}
 
     def setup_logging(self):
         """Sets up logging to both console (clean) and file (detailed)."""
@@ -49,11 +50,19 @@ class MaintainerrKometaGenerator:
 
     def validate_config(self):
         connect = self.config.get('connect', {})
+        output = self.config.get('output', {})
+        
         required_keys = ['maintainerr_host', 'maintainerr_port', 'maintainerr_user', 'maintainerr_pass']
         for key in required_keys:
             if key not in connect:
                 self.logger.critical(f"Missing required key in 'connect' section: {key}")
                 return False
+
+        # Check output paths
+        if not output.get('movies_path') or not output.get('shows_path'):
+             self.logger.critical("Missing 'movies_path' or 'shows_path' in 'output' section of config.")
+             return False
+             
         return True
 
     def construct_maintainerr_url(self):
@@ -95,40 +104,24 @@ class MaintainerrKometaGenerator:
             return []
 
     def get_external_id(self, item):
-        """
-        Attempts to find TMDb or TVDb ID from Maintainerr item data.
-        Returns tuple: (id_type, id_value) or (None, None)
-        id_type will be 'tmdb' or 'tvdb'.
-        """
-        # 1. Check explicit fields if Maintainerr provides them (common in 'tmdbId')
-        if item.get('tmdbId'):
-            return 'tmdb', item['tmdbId']
-        
-        if item.get('tvdbId'):
-            return 'tvdb', item['tvdbId']
+        # 1. Explicit fields
+        if item.get('tmdbId'): return 'tmdb', item['tmdbId']
+        if item.get('tvdbId'): return 'tvdb', item['tvdbId']
 
-        # 2. Check Plex GUIDs (common for Hama/Anime or legacy agents)
-        # Structure: "guid": "com.plexapp.agents.hama://tvdb-12345?lang=en"
-        # or "guids": [ { "id": "tmdb://123" } ]
-        
-        # Check nested guids array
+        # 2. Plex GUIDs
         plex_data = item.get('plexData', {})
         for guid_entry in plex_data.get('guids', []):
             guid_id = guid_entry.get('id', '')
-            if guid_id.startswith('tmdb://'):
-                return 'tmdb', int(guid_id.split('//')[1])
-            if guid_id.startswith('tvdb://'):
-                return 'tvdb', int(guid_id.split('//')[1])
+            if guid_id.startswith('tmdb://'): return 'tmdb', int(guid_id.split('//')[1])
+            if guid_id.startswith('tvdb://'): return 'tvdb', int(guid_id.split('//')[1])
 
-        # Check main guid string
+        # 3. Main GUID fallback
         main_guid = plex_data.get('guid', '')
         if 'tmdb-' in main_guid:
-            try:
-                return 'tmdb', int(main_guid.split('tmdb-')[1].split('?')[0].split('/')[0])
+            try: return 'tmdb', int(main_guid.split('tmdb-')[1].split('?')[0].split('/')[0])
             except: pass
         if 'tvdb-' in main_guid:
-            try:
-                return 'tvdb', int(main_guid.split('tvdb-')[1].split('?')[0].split('/')[0])
+            try: return 'tvdb', int(main_guid.split('tvdb-')[1].split('?')[0].split('/')[0])
             except: pass
 
         return None, None
@@ -137,8 +130,7 @@ class MaintainerrKometaGenerator:
         col_id = collection.get('id')
         delete_days_rule = collection.get('deleteAfterDays')
 
-        if delete_days_rule is None:
-             return
+        if delete_days_rule is None: return
 
         base_url = self.construct_maintainerr_url()
         url = f"{base_url}/api/collections/media/{col_id}/content/1?size=1000"
@@ -161,35 +153,29 @@ class MaintainerrKometaGenerator:
                 
                 time_str, urgency_level = self.get_time_string_and_urgency(time_left, delete_days_rule)
                 
-                if not time_str or not urgency_level:
-                    continue
+                if not time_str or not urgency_level: continue
 
-                # Determine Media Type
-                # Maintainerr 'mediaType' is usually 'movie' or 'tv'
-                # Plex 'type' is 'movie' or 'show'
                 media_type = item.get('mediaType') or item.get('plexData', {}).get('type')
-                
-                # Find ID
                 id_type, id_val = self.get_external_id(item)
                 
-                if not id_val:
-                    self.logger.warning(f"Skipping item '{item.get('title')}' - Could not find TMDb or TVDb ID.")
-                    continue
+                if not id_val: continue
 
                 group_key = f"{time_str}|{urgency_level}"
-                if group_key not in self.overlays_data:
-                    self.overlays_data[group_key] = {'tmdb_movie': [], 'tmdb_show': [], 'tvdb_show': []}
-
-                # Sort into correct builder bucket
+                
+                # Split into separate buckets
                 if media_type == 'movie':
+                    if group_key not in self.overlays_data_movies:
+                        self.overlays_data_movies[group_key] = {'tmdb_movie': []}
                     if id_type == 'tmdb':
-                        self.overlays_data[group_key]['tmdb_movie'].append(id_val)
-                    # If we only have tvdb for a movie (rare), we skip or add logic here
+                        self.overlays_data_movies[group_key]['tmdb_movie'].append(id_val)
+                
                 elif media_type in ['tv', 'show']:
+                    if group_key not in self.overlays_data_shows:
+                        self.overlays_data_shows[group_key] = {'tmdb_show': [], 'tvdb_show': []}
                     if id_type == 'tmdb':
-                        self.overlays_data[group_key]['tmdb_show'].append(id_val)
+                        self.overlays_data_shows[group_key]['tmdb_show'].append(id_val)
                     elif id_type == 'tvdb':
-                        self.overlays_data[group_key]['tvdb_show'].append(id_val)
+                        self.overlays_data_shows[group_key]['tvdb_show'].append(id_val)
 
             except Exception as e:
                 self.logger.error(f"Skipping item error: {e}")
@@ -207,58 +193,58 @@ class MaintainerrKometaGenerator:
         elif triggers.get('use_maintainerr_limit', False) and days <= collection_limit_days: return f"{days} Days", "monitor"
         else: return None, None
 
-    def generate_yaml(self):
-        raw_path = self.config.get('output', {}).get('yaml_path')
-        if not raw_path or "/path/to/" in raw_path:
-             self.logger.critical("Output path is default or missing.")
+    def write_single_file(self, file_path_key, data_dict):
+        """Helper to write a dictionary to a YAML file defined in config."""
+        output_path = self.config.get('output', {}).get(file_path_key)
+        
+        if not output_path or "/path/to/" in output_path:
+             self.logger.warning(f"Output path for '{file_path_key}' is default or missing. Skipping.")
              return
 
-        output_path = os.path.abspath(os.path.expanduser(raw_path))
+        output_path = os.path.abspath(os.path.expanduser(output_path))
         
         try:
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        except OSError as e:
-            self.logger.error(f"Directory error: {e}")
-            return
-        
-        kometa_config = {"overlays": {}}
-        
-        for group_key, buckets in self.overlays_data.items():
-            time_str, urgency = group_key.split("|")
-            styles = self.config.get('styles', {})
-            style = styles.get(urgency, styles.get('notice', {})).copy()
-            safe_key = f"maintainerr_{time_str.replace(' ', '_').replace('<', 'less').lower()}"
             
-            if urgency == "critical": text_content = f"EXPIRING: {time_str}"
-            elif urgency == "warning": text_content = f"Leaves in {time_str}"
-            elif urgency == "notice": text_content = f"Leaving: {time_str}"
-            else: text_content = f"Deletion: {time_str}"
+            kometa_config = {"overlays": {}}
             
-            # Build the definition using valid Builders
-            overlay_def = {
-                "overlay": { "name": f"text({text_content})", **style }
-            }
-            
-            # Add valid builders if they have data
-            if buckets['tmdb_movie']:
-                overlay_def['tmdb_movie'] = buckets['tmdb_movie']
-            if buckets['tmdb_show']:
-                overlay_def['tmdb_show'] = buckets['tmdb_show']
-            if buckets['tvdb_show']:
-                overlay_def['tvdb_show'] = buckets['tvdb_show']
-            
-            # Only add if we actually have items
-            if any(buckets.values()):
-                kometa_config["overlays"][safe_key] = overlay_def
-            
-        try:
+            for group_key, buckets in data_dict.items():
+                time_str, urgency = group_key.split("|")
+                styles = self.config.get('styles', {})
+                style = styles.get(urgency, styles.get('notice', {})).copy()
+                safe_key = f"maintainerr_{time_str.replace(' ', '_').replace('<', 'less').lower()}"
+                
+                if urgency == "critical": text_content = f"EXPIRING: {time_str}"
+                elif urgency == "warning": text_content = f"Leaves in {time_str}"
+                elif urgency == "notice": text_content = f"Leaving: {time_str}"
+                else: text_content = f"Deletion: {time_str}"
+                
+                overlay_def = { "overlay": { "name": f"text({text_content})", **style } }
+                
+                # Add only non-empty builders
+                has_items = False
+                for builder, ids in buckets.items():
+                    if ids: 
+                        overlay_def[builder] = ids
+                        has_items = True
+                
+                if has_items:
+                    kometa_config["overlays"][safe_key] = overlay_def
+
             with open(output_path, 'w') as f:
-                f.write("# Generated by Maintainerr-Kometa Script\n")
-                f.write(f"# Generated at: {datetime.now()}\n")
+                f.write(f"# Generated by Maintainerr-Kometa Script at {datetime.now()}\n")
                 yaml.dump(kometa_config, f, sort_keys=False)
             self.logger.info(f"Successfully wrote YAML to {output_path}")
+            
         except Exception as e:
-            self.logger.error(f"Failed to write YAML file: {e}")
+            self.logger.error(f"Failed to write {output_path}: {e}")
+
+    def generate_yaml(self):
+        # Write Movies File
+        self.write_single_file("movies_path", self.overlays_data_movies)
+        
+        # Write Shows File
+        self.write_single_file("shows_path", self.overlays_data_shows)
 
 if __name__ == "__main__":
     config_file = sys.argv[1] if len(sys.argv) > 1 else "config.yaml"
