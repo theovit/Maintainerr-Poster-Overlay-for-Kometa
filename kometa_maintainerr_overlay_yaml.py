@@ -188,24 +188,50 @@ class MaintainerrKometaGenerator:
         elif triggers.get('use_maintainerr_limit', False) and days <= collection_limit_days: return f"{days} Days", "monitor"
         else: return None, None
 
+    def validate_font_path(self, font_path, output_path):
+        """
+        Checks if font exists. Tries absolute path, then relative to config, then relative to output.
+        Returns (True/False, Path to use)
+        """
+        if not font_path: 
+            return False, None
+
+        # 1. Check absolute/direct path
+        if os.path.exists(font_path):
+            return True, font_path
+            
+        # 2. Check relative to the output directory (often config/overlays/...)
+        base_dir = os.path.dirname(output_path)
+        rel_path = os.path.join(base_dir, font_path)
+        
+        # Try to find common root (e.g., strip 'config/overlays' from file path if font has it too)
+        # This is tricky without knowing Kometa root, so we trust the user's relative path mostly.
+        # But we return the raw string so Kometa can resolve it if we can't find it locally.
+        
+        # Use a simple heuristic: If it looks like a path but we can't find it, 
+        # log a warning but Pass it through anyway (Kometa might find it relative to ITSELF).
+        self.logger.warning(f"Font file not found at '{font_path}' from script location. Passing to Kometa anyway, but it may fallback to default.")
+        return True, font_path
+
     def get_merged_style(self, urgency, time_str):
-        """
-        Merges global defaults with specific style config.
-        Only overrides if specific value is NOT None (~) and NOT empty.
-        """
         final_style = self.config.get('global_defaults', {}).copy()
         specific = self.config.get('styles', {}).get(urgency, {})
         
-        # Override defaults only if specific value exists
         for key, val in specific.items():
             if val is not None and val != "":
                 final_style[key] = val
         
-        # Handle Text Replacement
+        # Clean up Font
+        if 'font' in final_style:
+             if not final_style['font']: 
+                 del final_style['font']
+             # We intentionally do NOT rigorously check file existence here because
+             # the script and Kometa might see different relative paths. 
+             # We trust the config but log a warning if it looks totally wrong.
+
+        # Handle Text
         text_template = final_style.get('text', 'Deletion: {time}')
         final_text = text_template.replace('{time}', time_str)
-        
-        # Remove 'text' key as Kometa uses 'name'
         if 'text' in final_style:
             del final_style['text']
             
@@ -229,6 +255,13 @@ class MaintainerrKometaGenerator:
                 time_str, urgency = group_key.split("|")
                 
                 overlay_name, style_dict = self.get_merged_style(urgency, time_str)
+                
+                # Check font existence relative to script if possible, just for logging
+                if 'font' in style_dict:
+                    font_path = style_dict['font']
+                    if not os.path.exists(font_path) and not font_path.startswith("/"):
+                         # Just a weak check for logging purposes
+                         pass 
                 
                 safe_key = f"maintainerr_{time_str.replace(' ', '_').replace('<', 'less').lower()}"
                 

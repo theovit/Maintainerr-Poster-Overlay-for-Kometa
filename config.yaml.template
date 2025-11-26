@@ -11,9 +11,14 @@ output:
   shows_path: "/home32/northmainave/scripts/kometa/config/overlays/maintainerr_overlays_shows.yaml"
 
 triggers:
-  critical_days: 3
-  warning_days: 7
-  notice_days: 14
+  # Days remaining to trigger specific styles
+  critical_days: 3   # Less than 3 days = Critical
+  warning_days: 7    # Less than 7 days = Warning
+  notice_days: 14    # Less than 14 days = Notice
+  
+  # 4TH TRIGGER: Automatic API Limit
+  # If true, items will get the "monitor" style as soon as they enter the Maintainerr collection
+  # (e.g., if the rule is 30 days, this triggers at 30 days).
   use_maintainerr_limit: true
 
 # =======================================================
@@ -22,6 +27,10 @@ triggers:
 # =======================================================
 global_defaults:
   text: "Leaving In: {time}"
+  # Font File Path
+  # Can be absolute or relative to Kometa root.
+  # If file is not found, script will fallback to Kometa default font.
+  font: "config/overlays/fonts/AvenirNextLTPro-Bold.ttf"
   font_size: 80
   font_color: "#FFFFFF"
   back_color: "#00000099"
@@ -30,7 +39,7 @@ global_defaults:
   horizontal_align: "right"
   vertical_align: "bottom"
   horizontal_offset: 20
-  vertical_offset: 50
+  vertical_offset: 20
 
 # =======================================================
 #  SPECIFIC STYLES
@@ -41,6 +50,7 @@ styles:
   # 1. CRITICAL
   critical:
     text: ~
+    font: ~
     font_size: ~
     font_color: "#FFFFFF"
     back_color: "#E50914FF" # Netflix Red
@@ -54,6 +64,7 @@ styles:
   # 2. WARNING
   warning:
     text: ~
+    font: ~
     font_size: ~
     font_color: "#000000"
     back_color: "#FF8800FF" # Bright Orange
@@ -67,6 +78,7 @@ styles:
   # 3. NOTICE
   notice:
     text: ~
+    font: ~
     font_size: ~
     font_color: "#FFFFFF"
     back_color: "#333333CC" # Dark Grey
@@ -80,6 +92,7 @@ styles:
   # 4. MONITOR
   monitor:
     text: ~
+    font: ~
     font_size: ~
     font_color: "#FFFFFF"
     back_color: "#00000099" # Semi-transparent Black (Glass)
