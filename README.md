@@ -65,7 +65,7 @@ Controls the trigger.sh behavior.
       wait_time: 300  # Seconds to wait for silence (Debounce)
       python_cmd: "python3"
 # 🤖 Automation (Sonarr / Radarr)
-To trigger this script automatically when new media is added (so it gets the "Monitor" overlay immediately), set up a Custom Script in your Arrs.
+To trigger this script automatically when new media is added (so it gets the "Monitor" overlay immediately), set up a Custom Script in your *arrs.
 
     Go to: Settings > Connect > + > Custom Script.
     Name: Kometa Sync.
