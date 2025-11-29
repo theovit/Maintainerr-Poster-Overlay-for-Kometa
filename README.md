@@ -29,7 +29,7 @@ Configure: Copy the template and edit your settings.
 # ⚙️ Configuration
 The config.yaml is the single source of truth for the Python scripts and the Bash wrapper.
 
-#### 1. Connection & Output
+### 1. Connection & Output
 Define your connection details and where the Kometa files should be generated.
 
 
@@ -44,21 +44,21 @@ Define your connection details and where the Kometa files should be generated.
     output:
       movies_path: "/path/to/kometa/config/overlays/maintainerr_overlays_movies.yaml"
       shows_path: "/path/to/kometa/config/overlays/maintainerr_overlays_shows.yaml"
-#### 2. Styles (Global vs. Specific)
+### 2. Styles (Global vs. Specific)
 This project uses a Defaults/Override model. Set your baseline look in global_defaults, and only specific changes in styles.
 
 Global Defaults: Applied to everything (e.g., Bottom Right position, Font Size 60).
 
 Styles (Critical/Warning/Notice): Override specific values (e.g., Change background color to Red for Critical).
 
-#### 3. Asset Grabber
+### 3. Asset Grabber
 Ensures you always apply overlays to clean artwork.
 
     assets:
       enabled: true
       path: "/path/to/kometa/config/assets" # Where to save clean posters
       grab_originals: true # Tries to find non-local URL to avoid existing overlays
-#### 4. Execution Settings
+### 4. Execution Settings
 Controls the trigger.sh behavior.
 
     execution:
@@ -74,11 +74,11 @@ To trigger this script automatically when new media is added (so it gets the "Mo
     Save.
 
 
-##### Cron job
+#### Cron job
     crontab -e
     0 0,8,16 * * * /path/to/Maintainerr-Poster-Overlay-for-Kometa/trigger.sh
 
-#### How the Wrapper Works
+### How the Wrapper Works
     Trigger: Sonarr calls trigger.sh.
     Update: The script updates a timestamp file to Now + 5 Minutes.
     Background: It launches a worker in the background and exits immediately (so Sonarr doesn't hang).
@@ -101,11 +101,11 @@ Add the generated overlay files to your main Kometa config.yml. Note that Movies
         overlay_files:
           - file: config/overlays/maintainerr_overlays_shows.yaml
 # 🛠️ Manual Usage
-#### Run the full pipeline (Wait 5 mins + Sync):
+### Run the full pipeline (Wait 5 mins + Sync):
 `./trigger.sh`
-#### Run the full pipeline and WATCH logs live:
+### Run the full pipeline and WATCH logs live:
 `./trigger.sh --watch`
-#### Run just the Overlay Generator (Immediate execution):
+### Run just the Overlay Generator (Immediate execution):
 `python3 kometa_maintainerr_overlay_yaml.py`
-#### Run just the Asset Grabber (Immediate execution):
+### Run just the Asset Grabber (Immediate execution):
 `python3 asset_grabber.py`
