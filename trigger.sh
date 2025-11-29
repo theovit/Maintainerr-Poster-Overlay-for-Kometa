@@ -24,12 +24,12 @@ try:
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
         exec_conf = config.get('execution', {})
+        tssk_conf = config.get('tssk', {})
         
         def set_var(name, val): print(f'{name}=\"{val}\"')
 
         set_var('WAIT_TIME', exec_conf.get('wait_time', 300))
         
-        # Force Python to be unbuffered (-u) so logs show up instantly in --watch
         py_cmd = exec_conf.get('python_cmd', 'python3')
         if ' -u' not in py_cmd: py_cmd += ' -u'
         set_var('PYTHON_CMD', py_cmd)
@@ -47,6 +47,20 @@ try:
         else:
              set_var('KOMETA_SCRIPT', k_path)
         set_var('KOMETA_ARGS', exec_conf.get('kometa_args', '--run'))
+
+        # TSSK Settings
+        set_var('TSSK_ENABLED', str(tssk_conf.get('enabled', False)).lower())
+        
+        # Build TSSK Scripts Array
+        tssk_scripts = tssk_conf.get('scripts', [])
+        if isinstance(tssk_scripts, str): tssk_scripts = [tssk_scripts]
+        
+        # Convert all TSSK paths to absolute
+        abs_tssk = [get_abs_path('$BASE_DIR', s) for s in tssk_scripts]
+        
+        # Print as Bash Array
+        array_str = ' '.join([f'\"{s}\"' for s in abs_tssk])
+        print(f'TSSK_SCRIPTS=({array_str})')
 
 except Exception as e:
     sys.stderr.write(f\"Error parsing config.yaml: {e}\\n\")
@@ -79,7 +93,6 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
     echo "[$(date '+%H:%M:%S')] Worker started. Monitoring timer..." >> "$LOG_FILE"
 
     while true; do
-        # Strip whitespace to prevent math errors
         CURRENT_TARGET=$(cat "$TIMER_FILE" | tr -d '[:space:]')
         if [ -z "$CURRENT_TARGET" ]; then CURRENT_TARGET=$(date +%s); fi
 
@@ -95,9 +108,13 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
     done
 
     echo "[$(date '+%H:%M:%S')] Silence detected. Running workflows..." >> "$LOG_FILE"
+    
+    # Switch to script dir
     cd "$BASE_DIR" || { echo "[ERROR] Could not cd to $BASE_DIR" >> "$LOG_FILE"; exit 1; }
 
+    # --------------------------------
     # 1. Asset Grabber
+    # --------------------------------
     if [ -f "$ASSET_SCRIPT" ]; then
         echo "[$(date '+%H:%M:%S')] Step 1: Asset Grabber" >> "$LOG_FILE"
         $PYTHON_CMD "$ASSET_SCRIPT" >> "$LOG_FILE" 2>&1
@@ -105,23 +122,46 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
         echo "[$(date '+%H:%M:%S')] [ERROR] Missing Script: $ASSET_SCRIPT" >> "$LOG_FILE"
     fi
 
-    # 2. Overlay Generator
+    # --------------------------------
+    # 2. TSSK Scripts (New Step)
+    # --------------------------------
+    if [ "$TSSK_ENABLED" == "true" ]; then
+        echo "[$(date '+%H:%M:%S')] Step 2: Running TSSK Scripts..." >> "$LOG_FILE"
+        
+        count=1
+        for tssk_script in "${TSSK_SCRIPTS[@]}"; do
+            if [ -f "$tssk_script" ]; then
+                echo "[$(date '+%H:%M:%S')]   > Running TSSK #$count: $(basename "$tssk_script")" >> "$LOG_FILE"
+                $PYTHON_CMD "$tssk_script" >> "$LOG_FILE" 2>&1
+            else
+                echo "[$(date '+%H:%M:%S')]   > [ERROR] TSSK Script not found: $tssk_script" >> "$LOG_FILE"
+            fi
+            ((count++))
+        done
+    else
+        echo "[$(date '+%H:%M:%S')] Step 2: TSSK Scripts (Disabled)" >> "$LOG_FILE"
+    fi
+
+    # --------------------------------
+    # 3. Overlay Generator
+    # --------------------------------
     if [ -f "$OVERLAY_SCRIPT" ]; then
-        echo "[$(date '+%H:%M:%S')] Step 2: Overlay Generator" >> "$LOG_FILE"
+        echo "[$(date '+%H:%M:%S')] Step 3: Overlay Generator" >> "$LOG_FILE"
         $PYTHON_CMD "$OVERLAY_SCRIPT" >> "$LOG_FILE" 2>&1
     else
         echo "[$(date '+%H:%M:%S')] [ERROR] Missing Script: $OVERLAY_SCRIPT" >> "$LOG_FILE"
     fi
 
-    # 3. Kometa
-    # Switch to Kometa directory if possible to handle relative config paths
+    # --------------------------------
+    # 4. Kometa
+    # --------------------------------
     KOMETA_DIR=$(dirname "$KOMETA_SCRIPT")
     if [ -d "$KOMETA_DIR" ] && [ "$KOMETA_DIR" != "." ]; then
-        echo "[$(date '+%H:%M:%S')] Step 3: Running Kometa (Switching to $KOMETA_DIR)..." >> "$LOG_FILE"
+        echo "[$(date '+%H:%M:%S')] Step 4: Running Kometa (Switching to $KOMETA_DIR)..." >> "$LOG_FILE"
         cd "$KOMETA_DIR"
         $PYTHON_CMD "$(basename "$KOMETA_SCRIPT")" $KOMETA_ARGS >> "$LOG_FILE" 2>&1
     else
-        echo "[$(date '+%H:%M:%S')] Step 3: Running Kometa..." >> "$LOG_FILE"
+        echo "[$(date '+%H:%M:%S')] Step 4: Running Kometa..." >> "$LOG_FILE"
         $PYTHON_CMD "$KOMETA_SCRIPT" $KOMETA_ARGS >> "$LOG_FILE" 2>&1
     fi
 
@@ -135,7 +175,7 @@ fi
 TARGET_TIME=$(($(date +%s) + $WAIT_TIME))
 echo "$TARGET_TIME" > "$TIMER_FILE"
 
-echo "[$(date '+%H:%M:%S')] Trigger received. Timer set to +$WAIT_TIME sec." >> "$LOG_FILE"
+echo "[$(date '+%H:%M:%S')] Trigger received from user: $(whoami). Timer set to +$WAIT_TIME sec." >> "$LOG_FILE"
 echo "-----------------------------------------------------"
 echo " Kometa Sync Triggered!"
 echo "-----------------------------------------------------"

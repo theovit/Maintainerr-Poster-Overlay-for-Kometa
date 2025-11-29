@@ -124,6 +124,18 @@ assets:
   grab_originals: true
 
 # =======================================================
+#  TSSK SETTINGS (The Overlay Manager Scripts)
+#  Run after Asset Grabber, but before Kometa.
+# =======================================================
+tssk:
+  enabled: true
+
+# List all TSSK scripts you want to run here
+scripts:
+  - "path/to/tssk_sonarr_1.py"
+  - "path/to/tssk_sonarr_2.py"
+
+# =======================================================
 #  EXECUTION / WRAPPER SETTINGS
 #  Used by run_all.sh to manage debounce, locking, and paths.
 # =======================================================
