@@ -6,7 +6,6 @@
 CONFIG_FILE="config.yaml"
 BASE_DIR=$(dirname "$(realpath "$0")")
 
-# Parse Config
 eval $(python3 -c "
 import yaml, os, sys
 
@@ -61,7 +60,6 @@ ensure_file_dir() {
     chmod 666 "$file_path" 2>/dev/null
 }
 
-# Run prep immediately
 ensure_file_dir "$LOCK_FILE"
 ensure_file_dir "$TIMER_FILE"
 ensure_file_dir "$LOG_FILE"
@@ -70,20 +68,14 @@ ensure_file_dir "$LOG_FILE"
 # MODE 1: THE WORKER (Background Process)
 # =======================================================
 if [ "$KOMETA_WORKER_MODE" == "true" ]; then
-    # Redirect ALL errors to the log file so we can see crashes
     exec 2>>"$LOG_FILE"
-
-    # Acquire Lock
     exec 200>"$LOCK_FILE"
     flock -n 200 || exit 0
 
     echo "[$(date '+%H:%M:%S')] Worker started. Monitoring timer..." >> "$LOG_FILE"
 
     while true; do
-        # Read timer, strip whitespace/newlines to prevent math errors
         CURRENT_TARGET=$(cat "$TIMER_FILE" | tr -d '[:space:]')
-        
-        # Safety fallback if file is empty
         if [ -z "$CURRENT_TARGET" ]; then CURRENT_TARGET=$(date +%s); fi
 
         CURRENT_TIME=$(date +%s)
@@ -92,13 +84,14 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
         if [ "$SLEEP_NEEDED" -le 0 ]; then
             break
         else
-            # Sleep in short bursts (10s) to check for file updates more reliably/safely
             if [ "$SLEEP_NEEDED" -gt 10 ]; then SLEEP_NEEDED=10; fi
             sleep "$SLEEP_NEEDED"
         fi
     done
 
     echo "[$(date '+%H:%M:%S')] Silence detected. Starting Scripts..." >> "$LOG_FILE"
+    
+    # Ensure we start in the script directory for the Generators
     cd "$BASE_DIR" || { echo "[ERROR] Could not cd to $BASE_DIR" >> "$LOG_FILE"; exit 1; }
 
     # 1. Asset Grabber
@@ -117,9 +110,17 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
         echo "[$(date '+%H:%M:%S')] [ERROR] Missing Script: $OVERLAY_SCRIPT" >> "$LOG_FILE"
     fi
 
-    # 3. Kometa
-    echo "[$(date '+%H:%M:%S')] Step 3: Kometa" >> "$LOG_FILE"
-    $PYTHON_CMD "$KOMETA_SCRIPT" $KOMETA_ARGS >> "$LOG_FILE" 2>&1
+    # 3. Kometa (Switch Context!)
+    # We CD into the Kometa directory so relative paths in config.yml work correctly
+    KOMETA_DIR=$(dirname "$KOMETA_SCRIPT")
+    if [ -d "$KOMETA_DIR" ]; then
+        echo "[$(date '+%H:%M:%S')] Step 3: Running Kometa (Switching dir to $KOMETA_DIR)..." >> "$LOG_FILE"
+        cd "$KOMETA_DIR"
+        $PYTHON_CMD "$(basename "$KOMETA_SCRIPT")" $KOMETA_ARGS >> "$LOG_FILE" 2>&1
+    else
+        echo "[$(date '+%H:%M:%S')] Step 3: Running Kometa (Path not found, running direct)..." >> "$LOG_FILE"
+        $PYTHON_CMD "$KOMETA_SCRIPT" $KOMETA_ARGS >> "$LOG_FILE" 2>&1
+    fi
 
     echo "[$(date '+%H:%M:%S')] All tasks completed." >> "$LOG_FILE"
     exit 0
@@ -128,15 +129,9 @@ fi
 # =======================================================
 # MODE 2: THE TRIGGER
 # =======================================================
-# Update Timer
 TARGET_TIME=$(($(date +%s) + $WAIT_TIME))
 echo "$TARGET_TIME" > "$TIMER_FILE"
-
-# Log
 echo "[$(date '+%H:%M:%S')] Trigger received from user: $(whoami). Timer set to +$WAIT_TIME sec." >> "$LOG_FILE"
-
-# Launch Worker
 export KOMETA_WORKER_MODE="true"
 nohup "$0" >> "$LOG_FILE" 2>&1 &
-
 exit 0
