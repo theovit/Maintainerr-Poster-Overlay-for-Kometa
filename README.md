@@ -1,6 +1,9 @@
-# Maintainerr Poster Overlay for Kometa
 
-This project automates the process of displaying **expiration overlays** on your Plex media based on **Maintainerr** deletion rules. It bridges the gap between Maintainerr and Kometa, ensuring your users know exactly when content is leaving.
+
+# Maintainerr Poster Overlay for Kometa
+Project inspired by [Maintainerr Poster Overlay](https://gitlab.com/jakeC207/maintainerr-poster-overlay "Maintainerr Poster Overlay")
+
+This project automates the process of displaying **expiration overlays** on your Plex media based on **Maintainerr** deletion rules. It bridges the gap between Maintainerr and Kometa, ensuring your users know exactly when content is leaving. It is meant for seedboxes with limited rights but should work on any system that has python.
 
 It includes a robust **Asset Grabber** to ensure overlays are applied to clean posters (preventing "burned-in" loops) and a **Debounce Wrapper** to handle high-volume triggers from Sonarr/Radarr without overloading your system.
 
