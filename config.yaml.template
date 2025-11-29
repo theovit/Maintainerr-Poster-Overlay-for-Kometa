@@ -7,8 +7,8 @@ connect:
   plex_token: "YOUR_PLEX_TOKEN"
 
 output:
-  movies_path: "/home32/northmainave/scripts/kometa/config/overlays/maintainerr_overlays_movies.yaml"
-  shows_path: "/home32/northmainave/scripts/kometa/config/overlays/maintainerr_overlays_shows.yaml"
+  movies_path: "/path/to/kometa/config/overlays/maintainerr_overlays_movies.yaml"
+  shows_path: "/path/to/kometa/config/overlays/maintainerr_overlays_shows.yaml"
 
 triggers:
   # Days remaining to trigger specific styles
@@ -102,3 +102,23 @@ styles:
     vertical_align: ~
     horizontal_offset: ~
     vertical_offset: ~
+
+# =======================================================
+#  ASSET GRABBER SETTINGS
+#  Used by kometa_asset_grabber.py
+# =======================================================
+assets:
+  # Set to false to skip asset downloading completely
+  enabled: true
+  # Where to save the downloaded posters
+  path: "/path/to/kometa/config/assets"
+  
+  # Libraries to scan (Case sensitive, must match Plex exactly)
+  libraries:
+    - "Movies"
+    - "TV Shows"
+
+  # If true, tries to find a URL from a metadata provider (e.g. TMDb)
+  # to avoid downloading an image that already has an overlay burned in.
+  # May result in different images than what Plex is using.
+  grab_originals: true
