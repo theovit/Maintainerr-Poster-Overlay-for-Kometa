@@ -28,7 +28,11 @@ try:
         def set_var(name, val): print(f'{name}=\"{val}\"')
 
         set_var('WAIT_TIME', exec_conf.get('wait_time', 300))
-        set_var('PYTHON_CMD', exec_conf.get('python_cmd', 'python3'))
+        
+        # Force Python to be unbuffered (-u) so logs show up instantly in --watch
+        py_cmd = exec_conf.get('python_cmd', 'python3')
+        if ' -u' not in py_cmd: py_cmd += ' -u'
+        set_var('PYTHON_CMD', py_cmd)
         
         set_var('LOCK_FILE', get_abs_path('$BASE_DIR', exec_conf.get('lock_file', '/tmp/kometa_sync.lock')))
         set_var('TIMER_FILE', get_abs_path('$BASE_DIR', exec_conf.get('timer_file', '/tmp/kometa_sync.timer')))
@@ -75,6 +79,7 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
     echo "[$(date '+%H:%M:%S')] Worker started. Monitoring timer..." >> "$LOG_FILE"
 
     while true; do
+        # Strip whitespace to prevent math errors
         CURRENT_TARGET=$(cat "$TIMER_FILE" | tr -d '[:space:]')
         if [ -z "$CURRENT_TARGET" ]; then CURRENT_TARGET=$(date +%s); fi
 
@@ -89,9 +94,7 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
         fi
     done
 
-    echo "[$(date '+%H:%M:%S')] Silence detected. Starting Scripts..." >> "$LOG_FILE"
-    
-    # Ensure we start in the script directory for the Generators
+    echo "[$(date '+%H:%M:%S')] Silence detected. Running workflows..." >> "$LOG_FILE"
     cd "$BASE_DIR" || { echo "[ERROR] Could not cd to $BASE_DIR" >> "$LOG_FILE"; exit 1; }
 
     # 1. Asset Grabber
@@ -110,15 +113,15 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
         echo "[$(date '+%H:%M:%S')] [ERROR] Missing Script: $OVERLAY_SCRIPT" >> "$LOG_FILE"
     fi
 
-    # 3. Kometa (Switch Context!)
-    # We CD into the Kometa directory so relative paths in config.yml work correctly
+    # 3. Kometa
+    # Switch to Kometa directory if possible to handle relative config paths
     KOMETA_DIR=$(dirname "$KOMETA_SCRIPT")
-    if [ -d "$KOMETA_DIR" ]; then
-        echo "[$(date '+%H:%M:%S')] Step 3: Running Kometa (Switching dir to $KOMETA_DIR)..." >> "$LOG_FILE"
+    if [ -d "$KOMETA_DIR" ] && [ "$KOMETA_DIR" != "." ]; then
+        echo "[$(date '+%H:%M:%S')] Step 3: Running Kometa (Switching to $KOMETA_DIR)..." >> "$LOG_FILE"
         cd "$KOMETA_DIR"
         $PYTHON_CMD "$(basename "$KOMETA_SCRIPT")" $KOMETA_ARGS >> "$LOG_FILE" 2>&1
     else
-        echo "[$(date '+%H:%M:%S')] Step 3: Running Kometa (Path not found, running direct)..." >> "$LOG_FILE"
+        echo "[$(date '+%H:%M:%S')] Step 3: Running Kometa..." >> "$LOG_FILE"
         $PYTHON_CMD "$KOMETA_SCRIPT" $KOMETA_ARGS >> "$LOG_FILE" 2>&1
     fi
 
@@ -131,7 +134,23 @@ fi
 # =======================================================
 TARGET_TIME=$(($(date +%s) + $WAIT_TIME))
 echo "$TARGET_TIME" > "$TIMER_FILE"
-echo "[$(date '+%H:%M:%S')] Trigger received from user: $(whoami). Timer set to +$WAIT_TIME sec." >> "$LOG_FILE"
+
+echo "[$(date '+%H:%M:%S')] Trigger received. Timer set to +$WAIT_TIME sec." >> "$LOG_FILE"
+echo "-----------------------------------------------------"
+echo " Kometa Sync Triggered!"
+echo "-----------------------------------------------------"
+echo " The script is now waiting $WAIT_TIME seconds for other imports."
+echo " Logs are being written to: $LOG_FILE"
+
+# Launch Background Worker
 export KOMETA_WORKER_MODE="true"
 nohup "$0" >> "$LOG_FILE" 2>&1 &
+
+# Handle --watch flag
+if [[ "$1" == "--watch" ]]; then
+    echo " Watching logs now (Ctrl+C to exit view)..."
+    echo "-----------------------------------------------------"
+    tail -f "$LOG_FILE"
+fi
+
 exit 0
