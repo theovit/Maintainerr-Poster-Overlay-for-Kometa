@@ -26,7 +26,7 @@ Configure: Copy the template and edit your settings.
 
     cp config.yaml.template config.yaml
     nano config.yaml
-#⚙️ Configuration
+# ⚙️ Configuration
 The config.yaml is the single source of truth for the Python scripts and the Bash wrapper.
 
 #### 1. Connection & Output
