@@ -122,3 +122,30 @@ assets:
   # to avoid downloading an image that already has an overlay burned in.
   # May result in different images than what Plex is using.
   grab_originals: true
+
+# =======================================================
+#  EXECUTION / WRAPPER SETTINGS
+#  Used by run_all.sh to manage debounce, locking, and paths.
+# =======================================================
+execution:
+  # How long to wait for silence (no new imports) before running (Seconds)
+  wait_time: 300
+  
+  # Python command to use (e.g. "python3", "/usr/bin/python3", "python")
+  python_cmd: "python3"
+
+  # Temporary Files for locking and logging
+  lock_file: "/tmp/kometa_sync.lock"
+  timer_file: "/tmp/kometa_sync.timer"
+  log_file: "/tmp/kometa_sync_wrapper.log"
+
+  # Script Filenames / Paths
+  # These can be relative (if in same folder) or absolute paths.
+  asset_grabber_path: "kometa_asset_grabber.py"
+  overlay_generator_path: "kometa_maintainerr_overlay_yaml.py"
+  
+  # Kometa Path and Arguments
+  # If 'kometa_path' is just a command (like "kometa.py"), it checks the current folder or PATH.
+  # Otherwise, provide the full absolute path.
+  kometa_path: "kometa.py" 
+  kometa_args: "--run"
