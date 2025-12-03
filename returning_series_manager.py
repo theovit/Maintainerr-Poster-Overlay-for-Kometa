@@ -52,6 +52,52 @@ def get_sonarr_headers(api_key):
         "Content-Type": "application/json"
     }
 
+def check_and_fix_sonarr_settings(base_url, api_key):
+    """
+    Ensures that 'Create Empty Series Folders' is On
+    and 'Delete Empty Folders' is Off in Sonarr Media Management settings.
+    """
+    try:
+        url = f"{base_url.rstrip('/')}/api/v3/config/mediamanagement"
+        headers = get_sonarr_headers(api_key)
+        
+        logging.debug(f"Checking Media Management settings at: {url}")
+        
+        # 1. Get current settings
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        config = response.json()
+        
+        # 2. Check values (defaulting to None if key missing to avoid crashes on older API versions)
+        create_empty = config.get('createEmptySeriesFolders')
+        delete_empty = config.get('deleteEmptyFolders')
+        
+        needs_update = False
+        
+        # Requirement 1: Create Empty Series Folders must be TRUE
+        if create_empty is not True:
+            logging.info("   [Config Fix] Enabling 'Create Empty Series Folders' in Sonarr...")
+            config['createEmptySeriesFolders'] = True
+            needs_update = True
+        
+        # Requirement 2: Delete Empty Folders must be FALSE
+        if delete_empty is not False:
+            logging.info("   [Config Fix] Disabling 'Delete Empty Folders' in Sonarr...")
+            config['deleteEmptyFolders'] = False
+            needs_update = True
+            
+        # 3. Update if needed
+        if needs_update:
+            put_response = requests.put(url, headers=headers, json=config)
+            put_response.raise_for_status()
+            logging.info("   [Success] Sonarr Media Management settings updated.")
+        else:
+            logging.debug("   [OK] Sonarr Media Management settings are already correct.")
+            
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to check/update Sonarr settings: {e}")
+        # We continue even if this fails, as the main script might still work
+        
 def get_tag_id(base_url, api_key, tag_label):
     """
     Fetches the numeric ID for a specific tag text label.
@@ -175,6 +221,9 @@ def process_shows():
         sys.exit(1)
 
     logging.info("--- Starting Returning Series Manager ---")
+
+    # --- NEW: Check and Fix Sonarr Media Management Settings ---
+    check_and_fix_sonarr_settings(sonarr_url, sonarr_api_key)
 
     # Resolve Tag ID (Optional)
     target_tag_id = None
