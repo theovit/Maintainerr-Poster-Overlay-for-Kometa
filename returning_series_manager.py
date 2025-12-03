@@ -175,27 +175,18 @@ def main():
     if generate_overlay:
         if not overlay_output_path:
             logging.error("Overlay generation enabled, but 'returning_path' is missing in output config.")
-        elif not tmdb_ids_for_overlay:
-            logging.info("No empty returning series found. Clearing overlay file.")
-            # We explicitly write an empty/disabled file or just empty the list to clear old overlays
-            # Writing an empty list to 'plex_search' effectively removes the overlays
-            kometa_data = {
-                 "overlays": {
-                    "Returning Series": {
-                        "overlay": { "name": "Returning Series" }, # Minimal valid structure
-                        "plex_search": { "all": { "tmdb_id": [] } }
-                    }
-                }
-            }
-            with open(overlay_output_path, 'w') as f:
-                yaml.dump(kometa_data, f, sort_keys=False)
-
+        
         else:
-            logging.info(f"Generating Overlay YAML for {len(tmdb_ids_for_overlay)} series...")
-            
+            # Handle empty list case (to clear overlays if no shows match)
+            if not tmdb_ids_for_overlay:
+                logging.info("No empty returning series found. Clearing overlay configuration.")
+            else:
+                logging.info(f"Generating Overlay YAML for {len(tmdb_ids_for_overlay)} series using 'tmdb_show'...")
+
             # Merge Styles
             final_overlay_style = merge_styles(global_defaults, overlay_override)
             
+            # Construct YAML using tmdb_show instead of plex_search
             kometa_data = {
                 "overlays": {
                     "Returning Series": {
@@ -203,11 +194,7 @@ def main():
                             "name": "Returning Series",
                             **final_overlay_style
                         },
-                        "plex_search": {
-                            "all": {
-                                "tmdb_id": tmdb_ids_for_overlay
-                            }
-                        }
+                        "tmdb_show": tmdb_ids_for_overlay
                     }
                 }
             }
