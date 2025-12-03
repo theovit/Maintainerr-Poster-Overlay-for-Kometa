@@ -1,50 +1,32 @@
 import os
-import shutil
-import requests
-import yaml
-import re
 import sys
+import yaml
+import requests
 import logging
-import subprocess
 
-# Global constant for video extensions to check against
+# =======================================================
+# CONFIGURATION & CONSTANTS
+# =======================================================
+DEFAULT_CONFIG_PATH = 'config.yaml'
 VIDEO_EXTENSIONS = ('.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv')
 
 def load_config():
-    """
-    Loads the YAML configuration file.
-    Exits the script if the file is missing.
-    """
+    """Loads the YAML configuration file."""
     try:
-        with open('config.yaml', 'r') as f:
+        with open(DEFAULT_CONFIG_PATH, 'r') as f:
             return yaml.safe_load(f)
     except FileNotFoundError:
-        print("CRITICAL: config.yaml not found. Please create it.")
+        print(f"CRITICAL: {DEFAULT_CONFIG_PATH} not found.")
         sys.exit(1)
 
 def setup_logging(level_str):
-    """
-    Sets up logging to both the console (stdout) and a file (returning_series_manager.log).
-    """
+    """Sets up logging to console."""
     level = getattr(logging, level_str.upper(), logging.INFO)
-    logger = logging.getLogger()
-    logger.setLevel(level)
-    
-    # Clear existing handlers to prevent duplicates if function is called twice
-    if logger.hasHandlers():
-        logger.handlers.clear()
-
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-
-    file_handler = logging.FileHandler('returning_series_manager.log', mode='w')
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
-
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-
-    logging.debug(f"Logging initialized at level: {level_str}")
+    logging.basicConfig(
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        level=level,
+        handlers=[logging.StreamHandler()]
+    )
 
 def get_sonarr_headers(api_key):
     return {
@@ -52,77 +34,8 @@ def get_sonarr_headers(api_key):
         "Content-Type": "application/json"
     }
 
-def check_and_fix_sonarr_settings(base_url, api_key):
-    """
-    Ensures that 'Create Empty Series Folders' is On
-    and 'Delete Empty Folders' is Off in Sonarr Media Management settings.
-    """
-    try:
-        url = f"{base_url.rstrip('/')}/api/v3/config/mediamanagement"
-        headers = get_sonarr_headers(api_key)
-        
-        logging.debug(f"Checking Media Management settings at: {url}")
-        
-        # 1. Get current settings
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        config = response.json()
-        
-        # 2. Check values (defaulting to None if key missing to avoid crashes on older API versions)
-        create_empty = config.get('createEmptySeriesFolders')
-        delete_empty = config.get('deleteEmptyFolders')
-        
-        needs_update = False
-        
-        # Requirement 1: Create Empty Series Folders must be TRUE
-        if create_empty is not True:
-            logging.info("   [Config Fix] Enabling 'Create Empty Series Folders' in Sonarr...")
-            config['createEmptySeriesFolders'] = True
-            needs_update = True
-        
-        # Requirement 2: Delete Empty Folders must be FALSE
-        if delete_empty is not False:
-            logging.info("   [Config Fix] Disabling 'Delete Empty Folders' in Sonarr...")
-            config['deleteEmptyFolders'] = False
-            needs_update = True
-            
-        # 3. Update if needed
-        if needs_update:
-            put_response = requests.put(url, headers=headers, json=config)
-            put_response.raise_for_status()
-            logging.info("   [Success] Sonarr Media Management settings updated.")
-        else:
-            logging.debug("   [OK] Sonarr Media Management settings are already correct.")
-            
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to check/update Sonarr settings: {e}")
-        # We continue even if this fails, as the main script might still work
-        
-def get_tag_id(base_url, api_key, tag_label):
-    """
-    Fetches the numeric ID for a specific tag text label.
-    Returns None if tag is not found.
-    """
-    if not tag_label:
-        return None
-    
-    try:
-        url = f"{base_url.rstrip('/')}/api/v3/tag"
-        response = requests.get(url, headers=get_sonarr_headers(api_key))
-        response.raise_for_status()
-        tags = response.json()
-        
-        for tag in tags:
-            if tag['label'].lower() == tag_label.lower():
-                return tag['id']
-        
-        logging.warning(f"Tag '{tag_label}' configured but NOT found in Sonarr. Ignoring tag filter.")
-        return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error fetching tags: {e}")
-        return None
-
 def get_sonarr_series(base_url, api_key):
+    """Fetches all series from Sonarr."""
     try:
         url = f"{base_url.rstrip('/')}/api/v3/series"
         response = requests.get(url, headers=get_sonarr_headers(api_key))
@@ -132,40 +45,11 @@ def get_sonarr_series(base_url, api_key):
         logging.error(f"Error connecting to Sonarr: {e}")
         sys.exit(1)
 
-def create_plexmatch(show_path, tmdb_id, title, year):
-    plexmatch_path = os.path.join(show_path, ".plexmatch")
-    content = f"Title: {title}\nYear: {year}\ntmdbid: {tmdb_id}\n"
-    
-    if not os.path.exists(plexmatch_path):
-        try:
-            with open(plexmatch_path, 'w') as f:
-                f.write(content)
-            logging.info(f"   [+] Created .plexmatch for '{title}'")
-        except Exception as e:
-            logging.error(f"Failed to write plexmatch: {e}")
-
-def generate_blank_video(filepath):
-    try:
-        subprocess.run(["ffmpeg", "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        logging.error("FFMPEG not found. Cannot generate stub.")
-        return False
-
-    command = [
-        "ffmpeg", "-y", "-f", "lavfi",
-        "-i", "color=c=black:s=640x480:d=1",
-        "-c:v", "libx264", "-tune", "stillimage",
-        "-pix_fmt", "yuv420p", "-shortest", filepath
-    ]
-    
-    try:
-        subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        logging.info(f"   [+] Created stub (FFMPEG): {os.path.basename(filepath)}")
-        return True
-    except subprocess.CalledProcessError:
-        return False
-
 def has_real_media(show_path, stub_suffix):
+    """
+    Checks if a folder contains any real video files 
+    (excluding the Kometa stub file).
+    """
     if not os.path.exists(show_path):
         return False
         
@@ -176,137 +60,119 @@ def has_real_media(show_path, stub_suffix):
                     return True
     return False
 
-def clean_stubs(show_path, stub_suffix, clean_plexmatch=False):
-    if not os.path.exists(show_path):
-        return
+def merge_styles(global_defaults, specific_style):
+    """
+    Merges global defaults with specific overrides.
+    Only overrides if the specific value is NOT None (~).
+    """
+    if not specific_style:
+        return global_defaults.copy()
 
-    for root, dirs, files in os.walk(show_path):
-        for file in files:
-            if file.endswith(stub_suffix):
-                try:
-                    os.remove(os.path.join(root, file))
-                    logging.info(f"   [-] Removed stub: {file}")
-                except OSError:
-                    pass
+    final_style = global_defaults.copy()
+    
+    for key, value in specific_style.items():
+        if value is not None:
+            final_style[key] = value
+            
+    return final_style
 
-    if clean_plexmatch:
-        pm_path = os.path.join(show_path, ".plexmatch")
-        if os.path.exists(pm_path):
-            try:
-                os.remove(pm_path)
-                logging.info(f"   [-] Removed .plexmatch")
-            except OSError:
-                pass
-
-def process_shows():
+def main():
     config = load_config()
     
-    # Load settings
+    # --- Load Config Sections ---
     connect_cfg = config.get('connect', {})
     returning_cfg = config.get('returning', {})
-
-    sonarr_url = connect_cfg.get('sonarr_url')
-    sonarr_api_key = connect_cfg.get('sonarr_api_key')
+    output_cfg = config.get('output', {})
+    global_defaults = config.get('global_defaults', {})
     
+    # --- 1. Check Toggle (New) ---
+    # Defaults to False if missing to avoid accidental overwrites
+    if not returning_cfg.get('generate_overlay', False):
+        # We use print here because logging might not be set up yet if we exit early
+        print("Skipping Overlay Generation: 'generate_overlay' is False or missing in 'returning:' section.")
+        sys.exit(0)
+
+    # --- 2. Setup Logging ---
     log_level = returning_cfg.get('log_level', 'INFO')
-    target_tag_label = returning_cfg.get('sonarr_tag')
-    library_root = returning_cfg.get('library_root')
-    template_file = returning_cfg.get('template_file')
-    stub_suffix = returning_cfg.get('stub_suffix', '- kometa-overlay-lock.mp4')
-    
     setup_logging(log_level)
-
-    if not sonarr_url or not sonarr_api_key:
-        logging.critical("Sonarr URL or API Key missing.")
+    
+    # --- 3. Check Output Path (New) ---
+    output_path = output_cfg.get('returning_path')
+    if not output_path:
+        logging.critical("Missing 'returning_path' in the 'output:' section of config.yaml.")
         sys.exit(1)
 
-    logging.info("--- Starting Returning Series Manager ---")
+    # --- 4. Load Sonarr Settings ---
+    sonarr_url = connect_cfg.get('sonarr_url')
+    sonarr_api_key = connect_cfg.get('sonarr_api_key')
+    library_root = returning_cfg.get('library_root')
+    stub_suffix = returning_cfg.get('stub_suffix', '- kometa-overlay-lock.mp4')
+    overlay_override = returning_cfg.get('overlay_style', {})
 
-    # --- NEW: Check and Fix Sonarr Media Management Settings ---
-    check_and_fix_sonarr_settings(sonarr_url, sonarr_api_key)
+    if not sonarr_url or not sonarr_api_key:
+        logging.critical("Sonarr settings missing in connect config.")
+        sys.exit(1)
+        
+    logging.info("--- Generating Kometa Overlay YAML ---")
 
-    # Resolve Tag ID (Optional)
-    target_tag_id = None
-    if target_tag_label:
-        target_tag_id = get_tag_id(sonarr_url, sonarr_api_key, target_tag_label)
-        if target_tag_id:
-            logging.info(f"Filtering active. Tag: '{target_tag_label}' (ID: {target_tag_id})")
-        else:
-            # If tag lookup failed, we just log it and proceed without filtering by tag
-            logging.info("Tag not configured or not found. Processing based on Status only.")
-
+    # --- 5. Identify Target Shows ---
     series_list = get_sonarr_series(sonarr_url, sonarr_api_key)
+    tmdb_ids = []
 
     for show in series_list:
         title = show.get('title')
-        status = show.get('status').lower() # 'continuing', 'ended', 'upcoming'
+        status = show.get('status').lower()
         monitored = show.get('monitored')
-        tags = show.get('tags', [])
         tmdb_id = show.get('tmdbId')
-        year = show.get('year')
+        path = show.get('path')
         
-        folder_name = os.path.basename(show.get('path'))
-        
-        if not library_root:
-             logging.critical("library_root is missing in config.")
-             sys.exit(1)
-
-        show_path = os.path.join(library_root, folder_name)
-
-        # FILTER 1: Tag (If configured and found)
-        # Only filter if we successfully resolved a tag ID.
-        if target_tag_id and target_tag_id not in tags:
-            continue
-
-        # FILTER 2: Monitored Status
-        # Standard "Continuing" logic implies the show is monitored in Sonarr.
-        if not monitored:
-            # If show is unmonitored but ended, ensure cleanup
-            if status == "ended":
-                clean_stubs(show_path, stub_suffix, clean_plexmatch=True)
-            continue
-
-        # FILTER 3: Status Check
-        if status == "ended":
-            # Show ended -> Clean up any stubs
-            clean_stubs(show_path, stub_suffix, clean_plexmatch=True)
+        # Must be monitored and (Continuing OR Upcoming)
+        if not monitored or status not in ['continuing', 'upcoming']:
             continue
             
-        elif status == "continuing" or status == "upcoming":
-            # Show is active -> Check for media
-            if not os.path.exists(show_path):
-                logging.warning(f"   [!] Folder missing: {show_path}")
-                continue
+        folder_name = os.path.basename(path)
+        show_path = os.path.join(library_root, folder_name)
+        
+        # If it has NO real media, we want to overlay it
+        if not has_real_media(show_path, stub_suffix):
+            logging.debug(f"Target identified: {title}")
+            if tmdb_id:
+                tmdb_ids.append(tmdb_id)
 
-            if has_real_media(show_path, stub_suffix):
-                # Real media exists -> Clean stubs
-                clean_stubs(show_path, stub_suffix, clean_plexmatch=False)
-            else:
-                # No media -> Create stub
-                logging.info(f"Processing: {title} ({status})")
-                
-                season_path = os.path.join(show_path, "Specials")
-                if not os.path.exists(season_path):
-                    os.makedirs(season_path)
+    if not tmdb_ids:
+        logging.info("No returning series without media found. No file written.")
+        sys.exit(0)
 
-                clean_title = re.sub(r'[\\/*?:"<>|]', "", title)
-                stub_name = f"{clean_title} - S00E99{stub_suffix}"
-                stub_path = os.path.join(season_path, stub_name)
+    # --- 6. Build the Overlay Style ---
+    final_overlay_style = merge_styles(global_defaults, overlay_override)
+    
+    # --- 7. Construct Kometa YAML ---
+    kometa_data = {
+        "overlays": {
+            "Returning Series": {
+                "overlay": {
+                    "name": "Returning Series",
+                    **final_overlay_style
+                },
+                "plex_search": {
+                    "all": {
+                        "tmdb_id": tmdb_ids
+                    }
+                }
+            }
+        }
+    }
 
-                if not os.path.exists(stub_path):
-                    if template_file and os.path.exists(template_file):
-                        shutil.copy(template_file, stub_path)
-                        logging.info(f"   [+] Created stub (Template): {stub_name}")
-                    else:
-                        if generate_blank_video(stub_path):
-                             logging.info(f"   [+] Created stub (FFMPEG): {stub_name}")
-                        else:
-                             logging.error(f"   [X] Failed: {title}")
-                        
-                    if tmdb_id:
-                        create_plexmatch(show_path, tmdb_id, title, year)
-
-    logging.info("--- Run Complete ---")
+    # --- 8. Write to Configured Output Path ---
+    try:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
+        with open(output_path, 'w') as f:
+            yaml.dump(kometa_data, f, sort_keys=False)
+        logging.info(f"Successfully wrote Kometa config to: {output_path}")
+    except Exception as e:
+        logging.error(f"Failed to write YAML file: {e}")
 
 if __name__ == "__main__":
-    process_shows()
+    main()

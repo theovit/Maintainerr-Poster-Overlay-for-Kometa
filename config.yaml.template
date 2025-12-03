@@ -11,6 +11,8 @@ connect:
 output:
   movies_path: "/path/to/kometa/config/overlays/maintainerr_overlays_movies.yaml"
   shows_path: "/path/to/kometa/config/overlays/maintainerr_overlays_shows.yaml"
+  # NEW: Path for the generated returning series overlay file
+  returning_path: "/path/to/kometa/config/overlays/returning_overlays.yaml"
 
 triggers:
   # Days remaining to trigger specific styles
@@ -33,15 +35,15 @@ global_defaults:
   # Can be absolute or relative to Kometa root.
   # If file is not found, script will fallback to Kometa default font.
   font: "config/overlays/fonts/AvenirNextLTPro-Bold.ttf"
-  font_size: 80
+  font_size: 70
   font_color: "#FFFFFF"
   back_color: "#00000099"
   back_radius: 25
-  back_padding: 15
+  back_padding: 20
   horizontal_align: "right"
   vertical_align: "bottom"
-  horizontal_offset: 20
-  vertical_offset: 20
+  horizontal_offset: 65
+  vertical_offset: 175
 
 # =======================================================
 #  SPECIFIC STYLES
@@ -169,6 +171,8 @@ execution:
 #  Required for returning_series_manager.py
 # =======================================================  
 returning:
+  # NEW: Toggle to enable/disable the YAML generator script
+  generate_overlay: true
   # Path to your TV library root where the actual folders are located
   library_root: "/path/to/media/TV Shows"
 
@@ -181,3 +185,18 @@ returning:
 
   # Logging Level (DEBUG, INFO, WARNING, ERROR)
   log_level: "INFO"
+
+  # --- NO MEDIA OVERLAY STYLE (Kometa) ---
+  # Any setting set to ~ (null) will use the Global Default above.
+  overlay_style:
+    text: "NO EPISODES YET"
+    font: ~
+    font_size: ~
+    font_color: "#FFFFFF"
+    back_color: "#0077CCFF" # Blue
+    back_radius: ~
+    back_padding: ~
+    horizontal_align: ~ # Uses global (right)
+    vertical_align: ~ # Uses global (bottom)
+    horizontal_offset: ~ # Uses global
+    vertical_offset: ~ # Uses global
