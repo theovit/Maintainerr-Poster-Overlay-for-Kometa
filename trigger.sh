@@ -41,6 +41,10 @@ try:
         set_var('ASSET_SCRIPT', get_abs_path('$BASE_DIR', exec_conf.get('asset_grabber_path', 'kometa_asset_grabber.py')))
         set_var('OVERLAY_SCRIPT', get_abs_path('$BASE_DIR', exec_conf.get('overlay_generator_path', 'kometa_maintainerr_overlay_yaml.py')))
         
+        # --- NEW: RETURNING SERIES SCRIPT ---
+        # Defines the path to returning_series_manager.py
+        set_var('RETURNING_SCRIPT', get_abs_path('$BASE_DIR', 'returning_series_manager.py'))
+
         k_path = exec_conf.get('kometa_path', 'kometa.py')
         if os.path.exists(os.path.join('$BASE_DIR', k_path)):
              set_var('KOMETA_SCRIPT', os.path.join('$BASE_DIR', k_path))
@@ -123,7 +127,7 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
     fi
 
     # --------------------------------
-    # 2. TSSK Scripts (New Step)
+    # 2. TSSK Scripts
     # --------------------------------
     if [ "$TSSK_ENABLED" == "true" ]; then
         echo "[$(date '+%H:%M:%S')] Step 2: Running TSSK Scripts..." >> "$LOG_FILE"
@@ -143,25 +147,36 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
     fi
 
     # --------------------------------
-    # 3. Overlay Generator
+    # 3. Maintainerr Overlay Generator
     # --------------------------------
     if [ -f "$OVERLAY_SCRIPT" ]; then
-        echo "[$(date '+%H:%M:%S')] Step 3: Overlay Generator" >> "$LOG_FILE"
+        echo "[$(date '+%H:%M:%S')] Step 3: Maintainerr Overlay Generator" >> "$LOG_FILE"
         $PYTHON_CMD "$OVERLAY_SCRIPT" >> "$LOG_FILE" 2>&1
     else
         echo "[$(date '+%H:%M:%S')] [ERROR] Missing Script: $OVERLAY_SCRIPT" >> "$LOG_FILE"
     fi
 
     # --------------------------------
-    # 4. Kometa
+    # 4. Returning Series Manager
+    # --------------------------------
+    # This MUST run before Kometa so the stubs and overlays are ready
+    if [ -f "$RETURNING_SCRIPT" ]; then
+        echo "[$(date '+%H:%M:%S')] Step 4: Returning Series Manager" >> "$LOG_FILE"
+        $PYTHON_CMD "$RETURNING_SCRIPT" >> "$LOG_FILE" 2>&1
+    else
+        echo "[$(date '+%H:%M:%S')] [WARN] Returning Series Script not found at $RETURNING_SCRIPT" >> "$LOG_FILE"
+    fi
+
+    # --------------------------------
+    # 5. Kometa
     # --------------------------------
     KOMETA_DIR=$(dirname "$KOMETA_SCRIPT")
     if [ -d "$KOMETA_DIR" ] && [ "$KOMETA_DIR" != "." ]; then
-        echo "[$(date '+%H:%M:%S')] Step 4: Running Kometa (Switching to $KOMETA_DIR)..." >> "$LOG_FILE"
+        echo "[$(date '+%H:%M:%S')] Step 5: Running Kometa (Switching to $KOMETA_DIR)..." >> "$LOG_FILE"
         cd "$KOMETA_DIR"
         $PYTHON_CMD "$(basename "$KOMETA_SCRIPT")" $KOMETA_ARGS >> "$LOG_FILE" 2>&1
     else
-        echo "[$(date '+%H:%M:%S')] Step 4: Running Kometa..." >> "$LOG_FILE"
+        echo "[$(date '+%H:%M:%S')] Step 5: Running Kometa..." >> "$LOG_FILE"
         $PYTHON_CMD "$KOMETA_SCRIPT" $KOMETA_ARGS >> "$LOG_FILE" 2>&1
     fi
 
@@ -199,7 +214,6 @@ if [ "$SHOW_HELP" = true ]; then
     echo "Usage: ./trigger.sh [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --now, --skip-wait   Skip the debounce timer ($WAIT_TIME sec) and run immediately."
     echo "  --watch              Tail the log file ($LOG_FILE) to view progress."
     echo "  --help, -h           Show this help message."
     echo ""
