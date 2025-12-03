@@ -112,9 +112,11 @@ def create_stub_file(show_path, show_title, template_file, stub_suffix):
         logging.error(f"  > Failed to create stub file: {e}")
         return False
 
-def process_plex_label(plex, tmdb_id, title):
+def process_plex_label(plex, tmdb_id, title, stub_suffix):
     """
-    Finds the show in Plex by TMDb ID or Title and adds the lock label.
+    Finds the show in Plex by TMDb ID or Title.
+    1. Adds the lock label.
+    2. Finds the specific STUB episode and marks ONLY IT as Watched.
     """
     if not plex:
         return
@@ -136,12 +138,39 @@ def process_plex_label(plex, tmdb_id, title):
                 break
         
         if found_show:
+            # --- 1. Apply Label ---
             current_labels = [l.tag for l in found_show.labels]
             if PLEX_LABEL_NAME not in current_labels:
                 logging.info(f"  > Plex: Adding label '{PLEX_LABEL_NAME}' to '{found_show.title}'")
                 found_show.addLabel(PLEX_LABEL_NAME)
             else:
                 logging.debug(f"  > Plex: Label '{PLEX_LABEL_NAME}' already present.")
+
+            # --- 2. Mark ONLY Stub Episode as Watched ---
+            # We iterate episodes to find the one that corresponds to the stub file
+            found_stub = False
+            for episode in found_show.episodes():
+                is_this_stub = False
+                for media in episode.media:
+                    for part in media.parts:
+                        if part.file and part.file.endswith(stub_suffix):
+                            is_this_stub = True
+                            break
+                    if is_this_stub: break
+                
+                if is_this_stub:
+                    found_stub = True
+                    if not episode.isWatched:
+                        logging.info(f"  > Plex: Marking stub episode '{episode.title}' (S{episode.parentIndex}E{episode.index}) as watched.")
+                        episode.markWatched()
+                    else:
+                        logging.debug(f"  > Plex: Stub episode already watched.")
+                    # We can break once we find it, usually only one stub per show
+                    break
+            
+            if not found_stub:
+                logging.debug("  > Plex: Stub file not found in Plex inventory yet (might need scan).")
+
         else:
             # Only warn if we really expected to find it (meaning the stub exists)
             logging.warning(f"  > Plex: Could not find show '{title}' (TMDb: {tmdb_id}) to label. Ensure library is scanned.")
@@ -250,9 +279,10 @@ def main():
             # Action A: Create/Verify Stub
             create_stub_file(show_path, title, template_file, stub_suffix)
             
-            # Action B: Label in Plex (If available)
+            # Action B: Label & Mark Watched in Plex (If available)
             if plex_server and tmdb_id:
-                process_plex_label(plex_server, tmdb_id, title)
+                # Pass stub_suffix so we can identify the specific file
+                process_plex_label(plex_server, tmdb_id, title, stub_suffix)
             
             # Action C: Add to list for Overlay Generation
             if tmdb_id:
@@ -263,13 +293,14 @@ def main():
         if not overlay_output_path:
             logging.error("Overlay generation enabled, but 'returning_path' is missing in output config.")
         else:
-            # Check if list is empty
+            # Use underscore key to avoid potential parsing issues with spaces
+            yaml_key = "returning_series" 
+            
             if not tmdb_ids_for_overlay:
                 logging.info("No empty returning series found. Clearing overlay configuration.")
-                # Clear content
                 kometa_data = {
                     "overlays": {
-                        "returning_series": {
+                        yaml_key: {
                             "overlay": { "name": "Returning Series" },
                             "tmdb_show": [] 
                         }
@@ -278,23 +309,20 @@ def main():
             else:
                 logging.info(f"Generating Overlay YAML for {len(tmdb_ids_for_overlay)} series using 'tmdb_show'...")
 
-                # Merge Styles
                 final_overlay_style = merge_styles(global_defaults, overlay_override)
                 
                 # --- VALIDATE FONT ---
                 final_overlay_style = validate_font(final_overlay_style)
 
-                # --- FIX: USE 'text(...)' NAME FORMAT ---
-                # Extract text or use default
+                # --- USE 'text(...)' NAME FORMAT ---
                 overlay_text = final_overlay_style.pop('text', 'RETURNING')
-                # Format name as text(CONTENT) so Kometa detects Text Overlay mode
                 overlay_name = f"text({overlay_text})"
                 
                 logging.debug(f"Generated Overlay Name: {overlay_name}")
 
                 kometa_data = {
                     "overlays": {
-                        "returning_series": {
+                        yaml_key: {
                             "overlay": {
                                 "name": overlay_name,
                                 **final_overlay_style
