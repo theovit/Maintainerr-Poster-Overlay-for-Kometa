@@ -10,6 +10,14 @@ import shutil
 # =======================================================
 DEFAULT_CONFIG_PATH = 'config.yaml'
 VIDEO_EXTENSIONS = ('.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv')
+PLEX_LABEL_NAME = 'series-returning-lock'
+
+# Attempt to import plexapi
+try:
+    from plexapi.server import PlexServer
+    PLEX_AVAILABLE = True
+except ImportError:
+    PLEX_AVAILABLE = False
 
 def load_config():
     """Loads the YAML configuration file."""
@@ -98,14 +106,51 @@ def create_stub_file(show_path, show_title, template_file, stub_suffix):
         logging.error(f"  > Failed to create stub file: {e}")
         return False
 
+def process_plex_label(plex, tmdb_id, title):
+    """
+    Finds the show in Plex by TMDb ID or Title and adds the lock label.
+    """
+    if not plex:
+        return
+
+    found_show = None
+    
+    # Strategy 1: Search by TMDb ID (requires iterating GUIDs, can be slow, so we limit search by title first)
+    # Strategy 2: Search by Title, then verify GUID
+    try:
+        results = plex.search(title, libtype='show')
+        for item in results:
+            # Check GUIDs (e.g. tmdb://12345)
+            # Newer Plex agents might use plex://show/... so checking matches is safer
+            matches = [g.id for g in item.guids] if hasattr(item, 'guids') else []
+            # Also check the primary guid
+            matches.append(item.guid)
+            
+            # Look for tmdb://{id}
+            if any(f"tmdb://{tmdb_id}" in g for g in matches):
+                found_show = item
+                break
+            
+            # Fallback: If no GUID match but title matches exactly and year matches (if we had it), assume yes.
+            # Ideally we rely on TMDb ID.
+        
+        if found_show:
+            # Check if label exists
+            current_labels = [l.tag for l in found_show.labels]
+            if PLEX_LABEL_NAME not in current_labels:
+                logging.info(f"  > Plex: Adding label '{PLEX_LABEL_NAME}' to '{found_show.title}'")
+                found_show.addLabel(PLEX_LABEL_NAME)
+            else:
+                logging.debug(f"  > Plex: Label '{PLEX_LABEL_NAME}' already present.")
+        else:
+            logging.warning(f"  > Plex: Could not find show '{title}' (TMDb: {tmdb_id}) to label. Ensure library is scanned.")
+
+    except Exception as e:
+        logging.error(f"  > Plex Error: {e}")
+
 def merge_styles(global_defaults, specific_style):
-    """
-    Merges global defaults with specific overrides.
-    Only overrides if the specific value is NOT None (~).
-    """
     if not specific_style:
         return global_defaults.copy()
-
     final_style = global_defaults.copy()
     for key, value in specific_style.items():
         if value is not None:
@@ -124,12 +169,16 @@ def main():
 
     sonarr_url = connect_cfg.get('sonarr_url')
     sonarr_api_key = connect_cfg.get('sonarr_api_key')
+    
+    # Plex Settings
+    plex_url = connect_cfg.get('plex_url')
+    plex_token = connect_cfg.get('plex_token')
+    
     library_root = returning_cfg.get('library_root')
     template_file = returning_cfg.get('template_file')
     stub_suffix = returning_cfg.get('stub_suffix', '- kometa-overlay-lock.mp4')
     log_level = returning_cfg.get('log_level', 'INFO')
     
-    # Overlay Generation Settings
     generate_overlay = returning_cfg.get('generate_overlay', False)
     overlay_output_path = output_cfg.get('returning_path')
     overlay_override = returning_cfg.get('overlay_style', {})
@@ -140,10 +189,22 @@ def main():
         logging.critical("Missing required Sonarr or Library settings in config.yaml.")
         sys.exit(1)
 
+    # --- Initialize Plex ---
+    plex_server = None
+    if plex_url and plex_token:
+        if PLEX_AVAILABLE:
+            try:
+                plex_server = PlexServer(plex_url, plex_token)
+                logging.info(f"Connected to Plex: {plex_server.friendlyName}")
+            except Exception as e:
+                logging.error(f"Failed to connect to Plex: {e}")
+        else:
+            logging.warning("plexapi library not installed. Skipping Plex labeling.")
+    else:
+        logging.warning("Plex URL/Token not found in config. Skipping Plex labeling.")
+
     # --- 1. Scan and Manage Stubs ---
     series_list = get_sonarr_series(sonarr_url, sonarr_api_key)
-    
-    # List to store TMDb IDs for the overlay file
     tmdb_ids_for_overlay = []
 
     for show in series_list:
@@ -153,21 +214,23 @@ def main():
         tmdb_id = show.get('tmdbId')
         path = show.get('path')
 
-        # Criteria: Monitored AND (Continuing OR Upcoming)
         if not monitored or status not in ['continuing', 'upcoming']:
             continue
 
         folder_name = os.path.basename(path)
         show_path = os.path.join(library_root, folder_name)
 
-        # Check if the show has NO real media (only stubs or empty)
         if not has_real_media(show_path, stub_suffix):
             logging.info(f"Processing: {title} (TMDb: {tmdb_id}) | Status: {status}")
             
             # Action A: Create/Verify Stub
             create_stub_file(show_path, title, template_file, stub_suffix)
             
-            # Action B: Add to list for Overlay Generation
+            # Action B: Label in Plex (If available)
+            if plex_server and tmdb_id:
+                process_plex_label(plex_server, tmdb_id, title)
+            
+            # Action C: Add to list for Overlay Generation
             if tmdb_id:
                 tmdb_ids_for_overlay.append(tmdb_id)
 
@@ -175,18 +238,14 @@ def main():
     if generate_overlay:
         if not overlay_output_path:
             logging.error("Overlay generation enabled, but 'returning_path' is missing in output config.")
-        
         else:
-            # Handle empty list case (to clear overlays if no shows match)
             if not tmdb_ids_for_overlay:
                 logging.info("No empty returning series found. Clearing overlay configuration.")
             else:
                 logging.info(f"Generating Overlay YAML for {len(tmdb_ids_for_overlay)} series using 'tmdb_show'...")
 
-            # Merge Styles
             final_overlay_style = merge_styles(global_defaults, overlay_override)
             
-            # Construct YAML using tmdb_show instead of plex_search
             kometa_data = {
                 "overlays": {
                     "Returning Series": {
