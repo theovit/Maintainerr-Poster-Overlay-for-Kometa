@@ -169,10 +169,6 @@ execution:
 #  Required for returning_series_manager.py
 # =======================================================  
 returning:
-  # (Optional) Only process shows with this specific tag. 
-  # Leave empty (~) or remove line to process all shows.
-  sonarr_tag: "monitor"
-
   # Path to your TV library root where the actual folders are located
   library_root: "/path/to/media/TV Shows"
 
