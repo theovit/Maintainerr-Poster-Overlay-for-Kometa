@@ -29,12 +29,18 @@ def load_config():
         sys.exit(1)
 
 def setup_logging(level_str):
-    """Sets up logging to console."""
+    """Sets up logging to console (stdout) to ensure terminal visibility."""
     level = getattr(logging, level_str.upper(), logging.INFO)
+    
+    # Clear any existing handlers to prevent duplicates or silent swallowing
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        root_logger.handlers = []
+
     logging.basicConfig(
         format='%(asctime)s - %(levelname)s - %(message)s',
         level=level,
-        handlers=[logging.StreamHandler()]
+        handlers=[logging.StreamHandler(sys.stdout)]  # Explicitly use stdout
     )
 
 def get_sonarr_headers(api_key):
@@ -116,7 +122,7 @@ def process_plex_label(plex, tmdb_id, title):
     found_show = None
     
     try:
-        # FIXED: Changed libtype='show' to mediatype='show'
+        # Use mediatype='show' for proper Plex searching
         results = plex.search(title, mediatype='show')
         
         for item in results:
@@ -138,7 +144,6 @@ def process_plex_label(plex, tmdb_id, title):
                 logging.debug(f"  > Plex: Label '{PLEX_LABEL_NAME}' already present.")
         else:
             # Only warn if we really expected to find it (meaning the stub exists)
-            # Sometimes Plex hasn't scanned the new stub yet.
             logging.warning(f"  > Plex: Could not find show '{title}' (TMDb: {tmdb_id}) to label. Ensure library is scanned.")
 
     except Exception as e:
@@ -154,6 +159,10 @@ def merge_styles(global_defaults, specific_style):
     return final_style
 
 def main():
+    # Setup logging first with default INFO
+    # We will re-setup after loading config if a level is specified there
+    setup_logging('INFO')
+    
     logging.info("Starting Returning Series Manager...")
     config = load_config()
     
@@ -179,6 +188,7 @@ def main():
     overlay_output_path = output_cfg.get('returning_path')
     overlay_override = returning_cfg.get('overlay_style', {})
 
+    # Re-setup logging with configured level
     setup_logging(log_level)
 
     if not sonarr_url or not sonarr_api_key or not library_root:
