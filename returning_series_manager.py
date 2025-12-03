@@ -115,27 +115,21 @@ def process_plex_label(plex, tmdb_id, title):
 
     found_show = None
     
-    # Strategy 1: Search by TMDb ID (requires iterating GUIDs, can be slow, so we limit search by title first)
-    # Strategy 2: Search by Title, then verify GUID
     try:
-        results = plex.search(title, libtype='show')
+        # FIXED: Changed libtype='show' to mediatype='show'
+        results = plex.search(title, mediatype='show')
+        
         for item in results:
             # Check GUIDs (e.g. tmdb://12345)
-            # Newer Plex agents might use plex://show/... so checking matches is safer
             matches = [g.id for g in item.guids] if hasattr(item, 'guids') else []
-            # Also check the primary guid
             matches.append(item.guid)
             
             # Look for tmdb://{id}
             if any(f"tmdb://{tmdb_id}" in g for g in matches):
                 found_show = item
                 break
-            
-            # Fallback: If no GUID match but title matches exactly and year matches (if we had it), assume yes.
-            # Ideally we rely on TMDb ID.
         
         if found_show:
-            # Check if label exists
             current_labels = [l.tag for l in found_show.labels]
             if PLEX_LABEL_NAME not in current_labels:
                 logging.info(f"  > Plex: Adding label '{PLEX_LABEL_NAME}' to '{found_show.title}'")
@@ -143,6 +137,8 @@ def process_plex_label(plex, tmdb_id, title):
             else:
                 logging.debug(f"  > Plex: Label '{PLEX_LABEL_NAME}' already present.")
         else:
+            # Only warn if we really expected to find it (meaning the stub exists)
+            # Sometimes Plex hasn't scanned the new stub yet.
             logging.warning(f"  > Plex: Could not find show '{title}' (TMDb: {tmdb_id}) to label. Ensure library is scanned.")
 
     except Exception as e:
