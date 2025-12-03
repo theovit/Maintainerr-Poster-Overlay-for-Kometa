@@ -1,12 +1,36 @@
 connect:
-  maintainerr_host: "192.168.1.100"
-  maintainerr_port: 6246
-  maintainerr_user: "admin"
-  maintainerr_pass: "your#secure#password"
-  plex_url: "http://192.168.1.100:32400"
-  plex_token: "YOUR_PLEX_TOKEN"
-  sonarr_url: "http://192.168.1.100:8989"
-  sonarr_api_key: "YOUR_SONARR_API_KEY"
+  maintainerr:
+    maintainerr_host: "192.168.1.100"
+    maintainerr_port: 6246
+    maintainerr_user: "admin"
+    maintainerr_pass: "your#secure#password"
+  plex:
+    plex_url: "http://192.168.1.100:32400"
+    plex_token: "YOUR_PLEX_TOKEN"
+  sonarr_instances:
+    - name: "Sonarr - Anime"
+      url: "http://192.168.1.50:8989"
+      api_key: "API_KEY_HERE"
+      root_folder_path: "/data/media/anime" #docker path
+      library_path: "/mnt/user/media/anime" #host path
+
+    - name: "Sonarr - TV"
+      url: "http://192.168.1.50:8990"
+      api_key: "API_KEY_HERE"
+      root_folder_path: "/data/media/tv" #docker path
+      library_path: "/mnt/user/media/tv" #host path
+  radarr_instances:
+    - name: "Radarr - 4K"
+      url: "http://192.168.1.50:7878"
+      api_key: "API_KEY_HERE"
+      root_folder_path: "/data/media/movies_4k" #docker path
+      library_path: "/mnt/user/media/movies_4k" #host path
+
+    - name: "Radarr - 1080p"
+      url: "http://192.168.1.50:7879"
+      api_key: "API_KEY_HERE"
+      root_folder_path: "/data/media/movies" #docker path
+      library_path: "/mnt/user/media/movies" #host path
 
 output:
   movies_path: "/path/to/kometa/config/overlays/maintainerr_overlays_movies.yaml"
@@ -173,9 +197,6 @@ execution:
 returning:
   # NEW: Toggle to enable/disable the YAML generator script
   generate_overlay: true
-  # Path to your TV library root where the actual folders are located
-  library_root: "/path/to/media/TV Shows"
-
   # Path to a blank video file template (optional)
   # If this file is missing, the script will try to use FFMPEG to generate a black screen.
   template_file: "/path/to/kometa/config/assets/blank.mp4"
@@ -183,6 +204,9 @@ returning:
   # The suffix to append to the dummy files
   stub_suffix: "- kometa-overlay-lock.mp4"
 
+  libraries:
+    - "TV Shows"
+    - "Anime"
   # Logging Level (DEBUG, INFO, WARNING, ERROR)
   log_level: "INFO"
 
