@@ -158,9 +158,27 @@ def merge_styles(global_defaults, specific_style):
             final_style[key] = value
     return final_style
 
+def validate_font(style_dict):
+    """
+    Checks if the font file exists. If not, removes it from the style
+    to prevent Kometa crashing or falling back to image mode.
+    """
+    font_path = style_dict.get('font')
+    if font_path:
+        # Check absolute path or relative to current dir
+        if os.path.exists(font_path):
+            return style_dict
+        
+        # Check if it exists inside the 'config' folder if path started with 'config/'
+        if not os.path.exists(font_path):
+            logging.warning(f"  [WARN] Font file not found at: {font_path}")
+            logging.warning("  [WARN] Removing font setting to use Kometa default.")
+            del style_dict['font']
+            
+    return style_dict
+
 def main():
     # Setup logging first with default INFO
-    # We will re-setup after loading config if a level is specified there
     setup_logging('INFO')
     
     logging.info("Starting Returning Series Manager...")
@@ -245,24 +263,46 @@ def main():
         if not overlay_output_path:
             logging.error("Overlay generation enabled, but 'returning_path' is missing in output config.")
         else:
+            # Check if list is empty
             if not tmdb_ids_for_overlay:
                 logging.info("No empty returning series found. Clearing overlay configuration.")
+                # Clear content
+                kometa_data = {
+                    "overlays": {
+                        "returning_series": {
+                            "overlay": { "name": "Returning Series" },
+                            "tmdb_show": [] 
+                        }
+                    }
+                }
             else:
                 logging.info(f"Generating Overlay YAML for {len(tmdb_ids_for_overlay)} series using 'tmdb_show'...")
 
-            final_overlay_style = merge_styles(global_defaults, overlay_override)
-            
-            kometa_data = {
-                "overlays": {
-                    "Returning Series": {
-                        "overlay": {
-                            "name": "Returning Series",
-                            **final_overlay_style
-                        },
-                        "tmdb_show": tmdb_ids_for_overlay
+                # Merge Styles
+                final_overlay_style = merge_styles(global_defaults, overlay_override)
+                
+                # --- VALIDATE FONT ---
+                final_overlay_style = validate_font(final_overlay_style)
+
+                # --- FIX: USE 'text(...)' NAME FORMAT ---
+                # Extract text or use default
+                overlay_text = final_overlay_style.pop('text', 'RETURNING')
+                # Format name as text(CONTENT) so Kometa detects Text Overlay mode
+                overlay_name = f"text({overlay_text})"
+                
+                logging.debug(f"Generated Overlay Name: {overlay_name}")
+
+                kometa_data = {
+                    "overlays": {
+                        "returning_series": {
+                            "overlay": {
+                                "name": overlay_name,
+                                **final_overlay_style
+                            },
+                            "tmdb_show": tmdb_ids_for_overlay
+                        }
                     }
                 }
-            }
 
             try:
                 os.makedirs(os.path.dirname(overlay_output_path), exist_ok=True)
