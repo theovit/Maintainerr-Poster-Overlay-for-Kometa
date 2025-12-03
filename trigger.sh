@@ -172,14 +172,60 @@ fi
 # =======================================================
 # MODE 2: THE TRIGGER
 # =======================================================
-TARGET_TIME=$(($(date +%s) + $WAIT_TIME))
-echo "$TARGET_TIME" > "$TIMER_FILE"
 
-echo "[$(date '+%H:%M:%S')] Trigger received from user: $(whoami). Timer set to +$WAIT_TIME sec." >> "$LOG_FILE"
-echo "-----------------------------------------------------"
-echo " Kometa Sync Triggered!"
-echo "-----------------------------------------------------"
-echo " The script is now waiting $WAIT_TIME seconds for other imports."
+# PARSE ARGUMENTS
+FORCE_RUN=false
+WATCH_MODE=false
+SHOW_HELP=false
+
+for arg in "$@"; do
+    case $arg in
+        --now|--skip-wait)
+            FORCE_RUN=true
+            ;;
+        --watch)
+            WATCH_MODE=true
+            ;;
+        --help|-h)
+            SHOW_HELP=true
+            ;;
+    esac
+done
+
+# DISPLAY HELP
+if [ "$SHOW_HELP" = true ]; then
+    echo "Kometa Sync Trigger Wrapper"
+    echo "==========================="
+    echo "Usage: ./trigger.sh [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --now, --skip-wait   Skip the debounce timer ($WAIT_TIME sec) and run immediately."
+    echo "  --watch              Tail the log file ($LOG_FILE) to view progress."
+    echo "  --help, -h           Show this help message."
+    echo ""
+    exit 0
+fi
+
+# EXECUTE TRIGGER LOGIC
+if [ "$FORCE_RUN" = true ]; then
+    # If --now is used, set timer to current time (0 wait)
+    TARGET_TIME=$(date +%s)
+    echo "$TARGET_TIME" > "$TIMER_FILE"
+    echo "[$(date '+%H:%M:%S')] Trigger received with --now. Starting immediately." >> "$LOG_FILE"
+    echo "-----------------------------------------------------"
+    echo " Kometa Sync Triggered (IMMEDIATE)!"
+    echo "-----------------------------------------------------"
+else
+    # Normal behavior: Add wait time
+    TARGET_TIME=$(($(date +%s) + $WAIT_TIME))
+    echo "$TARGET_TIME" > "$TIMER_FILE"
+    echo "[$(date '+%H:%M:%S')] Trigger received from user: $(whoami). Timer set to +$WAIT_TIME sec." >> "$LOG_FILE"
+    echo "-----------------------------------------------------"
+    echo " Kometa Sync Triggered!"
+    echo "-----------------------------------------------------"
+    echo " The script is now waiting $WAIT_TIME seconds for other imports."
+fi
+
 echo " Logs are being written to: $LOG_FILE"
 
 # Launch Background Worker
@@ -187,7 +233,7 @@ export KOMETA_WORKER_MODE="true"
 nohup "$0" >> "$LOG_FILE" 2>&1 &
 
 # Handle --watch flag
-if [[ "$1" == "--watch" ]]; then
+if [ "$WATCH_MODE" = true ]; then
     echo " Watching logs now (Ctrl+C to exit view)..."
     echo "-----------------------------------------------------"
     tail -f "$LOG_FILE"
