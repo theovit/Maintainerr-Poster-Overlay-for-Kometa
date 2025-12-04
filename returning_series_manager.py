@@ -30,13 +30,11 @@ def load_config():
 
 def setup_logging(level_str, log_file_path=None):
     """
-    Sets up logging.
-    - Always logs to Console (stdout).
-    - If log_file_path is provided, ALSO logs to that file.
+    Sets up logging to Console AND File.
     """
     level = getattr(logging, level_str.upper(), logging.INFO)
     
-    # Reset existing handlers to prevent duplicates
+    # Reset handlers
     root_logger = logging.getLogger()
     if root_logger.handlers:
         root_logger.handlers = []
@@ -45,7 +43,7 @@ def setup_logging(level_str, log_file_path=None):
     
     if log_file_path:
         try:
-            # 'w' mode overwrites the log each run. Change to 'a' to append.
+            # Mode 'w' overwrites log each run. Use 'a' to keep history.
             file_handler = logging.FileHandler(log_file_path, mode='w', encoding='utf-8')
             handlers.append(file_handler)
         except Exception as e:
@@ -65,9 +63,7 @@ def get_sonarr_headers(api_key):
 
 def ensure_sonarr_settings(instance_name, base_url, api_key):
     """
-    Checks and enforces Media Management settings:
-    - Create Empty Series Folders: TRUE
-    - Delete Empty Folders: FALSE
+    Enforces: Create Empty Series Folders = True | Delete Empty Folders = False
     """
     try:
         headers = get_sonarr_headers(api_key)
@@ -80,7 +76,7 @@ def ensure_sonarr_settings(instance_name, base_url, api_key):
         create_empty = config_data.get('createEmptySeriesFolders', False)
         delete_empty = config_data.get('deleteEmptyFolders', False)
         
-        # We act if create_empty is False OR delete_empty is True
+        # We want: Create=True, Delete=False
         if not create_empty or delete_empty:
             logging.info(f"[{instance_name}] Updating Media Management settings...")
             
@@ -105,7 +101,7 @@ def ensure_sonarr_settings(instance_name, base_url, api_key):
         logging.error(f"[{instance_name}] Failed to update Sonarr settings: {e}")
 
 def get_sonarr_series(instance_name, base_url, api_key):
-    """Fetches all series from a specific Sonarr instance."""
+    """Fetches all series from Sonarr."""
     try:
         url = f"{base_url.rstrip('/')}/api/v3/series"
         logging.info(f"[{instance_name}] Connecting to Sonarr at {url}")
@@ -117,13 +113,9 @@ def get_sonarr_series(instance_name, base_url, api_key):
         return []
 
 def has_real_media(show_path, stub_suffix):
-    """
-    Checks if a folder contains any real video files 
-    (excluding the Kometa stub file).
-    """
+    """Returns True if any video file (other than stub) exists."""
     if not os.path.exists(show_path):
         return False
-        
     for root, dirs, files in os.walk(show_path):
         for file in files:
             if file.lower().endswith(VIDEO_EXTENSIONS):
@@ -132,15 +124,13 @@ def has_real_media(show_path, stub_suffix):
     return False
 
 def create_stub_file(show_path, show_title, template_file, stub_suffix):
-    """
-    Creates a stub video file in the show folder if it doesn't exist.
-    """
+    """Creates the dummy file if missing."""
     safe_title = "".join([c for c in show_title if c.isalpha() or c.isdigit() or c in ' .-_']).strip()
     stub_filename = f"{safe_title}{stub_suffix}"
     stub_path = os.path.join(show_path, stub_filename)
 
     if os.path.exists(stub_path):
-        logging.debug(f"  > Stub already exists: {stub_filename}")
+        # logging.debug(f"  > Stub already exists: {stub_filename}")
         return True
 
     if not os.path.exists(show_path):
@@ -157,27 +147,20 @@ def create_stub_file(show_path, show_title, template_file, stub_suffix):
             logging.info(f"  > Stub created (from template): {stub_path}")
         else:
             with open(stub_path, 'wb') as f:
-                f.write(b'\0' * 1024) # Write 1KB of null bytes
-            logging.warning(f"  > Stub created (empty file - no template found): {stub_path}")
+                f.write(b'\0' * 1024)
+            logging.warning(f"  > Stub created (empty file): {stub_path}")
         return True
     except Exception as e:
         logging.error(f"  > Failed to create stub file: {e}")
         return False
 
 def process_plex_label(plex, tmdb_id, title, stub_suffix):
-    """
-    Finds the show in Plex by TMDb ID or Title.
-    1. Adds the lock label.
-    2. Finds the specific STUB episode and marks ONLY IT as Watched.
-    """
+    """Labels show in Plex and marks stub episode as watched."""
     if not plex:
         return
-
-    found_show = None
-    
     try:
         results = plex.search(title, mediatype='show')
-        
+        found_show = None
         for item in results:
             matches = [g.id for g in item.guids] if hasattr(item, 'guids') else []
             matches.append(item.guid)
@@ -186,15 +169,13 @@ def process_plex_label(plex, tmdb_id, title, stub_suffix):
                 break
         
         if found_show:
-            # 1. Apply Label
+            # Label
             current_labels = [l.tag for l in found_show.labels]
             if PLEX_LABEL_NAME not in current_labels:
                 logging.info(f"  > Plex: Adding label '{PLEX_LABEL_NAME}' to '{found_show.title}'")
                 found_show.addLabel(PLEX_LABEL_NAME)
-            else:
-                logging.debug(f"  > Plex: Label already present.")
 
-            # 2. Mark specific stub episode as watched
+            # Mark Stub Watched
             found_stub = False
             for episode in found_show.episodes():
                 is_this_stub = False
@@ -210,12 +191,10 @@ def process_plex_label(plex, tmdb_id, title, stub_suffix):
                     if not episode.isWatched:
                         logging.info(f"  > Plex: Marking stub episode '{episode.title}' (S{episode.parentIndex}E{episode.index}) as watched.")
                         episode.markWatched()
-                    else:
-                        logging.debug(f"  > Plex: Stub episode already watched.")
                     break
             
             if not found_stub:
-                logging.debug("  > Plex: Stub file not found in Plex yet (might need scan).")
+                logging.debug("  > Plex: Stub file not found in Plex yet.")
         else:
             logging.warning(f"  > Plex: Could not find show '{title}' (TMDb: {tmdb_id}).")
     except Exception as e:
@@ -243,7 +222,7 @@ def validate_font(style_dict):
 
 def process_sonarr_instance(instance, plex_server, config_settings):
     """
-    Processes a single Sonarr instance from the list.
+    Processes a single Sonarr instance. Returns list of TMDb IDs.
     """
     name = instance.get('name', 'Unknown')
     url = instance.get('url')
@@ -253,10 +232,9 @@ def process_sonarr_instance(instance, plex_server, config_settings):
     library_root = instance.get('library_path')
 
     if not url or not api_key or not library_root:
-        logging.error(f"[{name}] Skipping: Missing url, api_key, or library_path in config.")
+        logging.error(f"[{name}] Skipping: Missing settings.")
         return []
 
-    # Enforce Settings
     ensure_sonarr_settings(name, url, api_key)
 
     template_file = config_settings['template_file']
@@ -264,6 +242,8 @@ def process_sonarr_instance(instance, plex_server, config_settings):
 
     series_list = get_sonarr_series(name, url, api_key)
     instance_tmdb_ids = []
+
+    logging.info(f"[{name}] Scanning {len(series_list)} shows...")
 
     for show in series_list:
         title = show.get('title')
@@ -274,9 +254,7 @@ def process_sonarr_instance(instance, plex_server, config_settings):
 
         # Filter by Root Folder
         if sonarr_root and sonarr_root not in sonarr_path:
-            logging.warning(f"[{name}] SKIPPING '{title}': Path Mismatch.")
-            logging.warning(f"   > Configured Root: '{sonarr_root}'")
-            logging.warning(f"   > Actual Show Path: '{sonarr_path}'")
+            # logging.debug(f"[{name}] Filtered Out: {title} (Path: {sonarr_path})")
             continue
 
         if not monitored or status not in ['continuing', 'upcoming']:
@@ -295,18 +273,19 @@ def process_sonarr_instance(instance, plex_server, config_settings):
             
             if tmdb_id:
                 instance_tmdb_ids.append(tmdb_id)
+                # DEBUG: Confirm we added it
+                # logging.debug(f"[{name}] + Added ID {tmdb_id} to list.")
 
+    logging.info(f"[{name}] Finished. IDs collected: {len(instance_tmdb_ids)}")
     return instance_tmdb_ids
 
 def main():
-    # Initial setup to stdout only
+    # 1. Basic Setup
     setup_logging('INFO')
-    
     logging.info("Starting Returning Series Manager (Multi-Instance)...")
     config = load_config()
     
-    # --- Parse Configuration ---
-    
+    # 2. Parse Config
     returning_cfg = config.get('returning', {})
     output_cfg = config.get('output', {})
     global_defaults = config.get('global_defaults', {})
@@ -318,18 +297,15 @@ def main():
 
     sonarr_instances = connect_cfg.get('sonarr_instances', [])
     
+    # 3. Setup File Logging
+    log_level = returning_cfg.get('log_level', 'INFO')
+    log_file_path = returning_cfg.get('log_file', 'returning_series_manager.log')
+    setup_logging(log_level, log_file_path)
+
     config_settings = {
         'template_file': returning_cfg.get('template_file'),
         'stub_suffix': returning_cfg.get('stub_suffix', '- kometa-overlay-lock.mp4')
     }
-
-    # --- SETUP FILE LOGGING ---
-    log_level = returning_cfg.get('log_level', 'INFO')
-    # Use log_file from config, or default to local file
-    log_file_path = returning_cfg.get('log_file', 'returning_series_manager.log')
-    
-    # Re-run setup to add the file handler
-    setup_logging(log_level, log_file_path)
 
     generate_overlay = returning_cfg.get('generate_overlay', False)
     overlay_output_path = output_cfg.get('returning_path')
@@ -339,7 +315,7 @@ def main():
         logging.critical("No 'sonarr_instances' found under 'connect:' in config.yaml.")
         sys.exit(1)
 
-    # --- Initialize Plex ---
+    # 4. Connect Plex
     plex_server = None
     if plex_url and plex_token and PLEX_AVAILABLE:
         try:
@@ -348,17 +324,18 @@ def main():
         except Exception as e:
             logging.error(f"Failed to connect to Plex: {e}")
 
-    # --- Process All Sonarr Instances ---
+    # 5. PROCESS INSTANCES
     master_tmdb_ids = []
 
     for instance in sonarr_instances:
         ids = process_sonarr_instance(instance, plex_server, config_settings)
         master_tmdb_ids.extend(ids)
 
+    # 6. Deduplicate
     master_tmdb_ids = list(set(master_tmdb_ids))
-    logging.info(f"Total Unique Returning Series found: {len(master_tmdb_ids)}")
+    logging.info(f"Total Unique Returning Series (All Instances): {len(master_tmdb_ids)}")
 
-    # --- Generate Overlay YAML ---
+    # 7. Generate YAML
     if generate_overlay:
         if not overlay_output_path:
             logging.error("Overlay generation enabled, but 'returning_path' is missing in 'output:' config.")
