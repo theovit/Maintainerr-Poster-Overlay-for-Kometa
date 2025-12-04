@@ -11,25 +11,21 @@ connect:
     - name: "Sonarr - Anime"
       url: "http://192.168.1.50:8989"
       api_key: "API_KEY_HERE"
-      root_folder_path: "/data/media/anime" #docker path
       library_path: "/mnt/user/media/anime" #host path
 
     - name: "Sonarr - TV"
       url: "http://192.168.1.50:8990"
       api_key: "API_KEY_HERE"
-      root_folder_path: "/data/media/tv" #docker path
       library_path: "/mnt/user/media/tv" #host path
   radarr_instances:
     - name: "Radarr - 4K"
       url: "http://192.168.1.50:7878"
       api_key: "API_KEY_HERE"
-      root_folder_path: "/data/media/movies_4k" #docker path
       library_path: "/mnt/user/media/movies_4k" #host path
 
     - name: "Radarr - 1080p"
       url: "http://192.168.1.50:7879"
       api_key: "API_KEY_HERE"
-      root_folder_path: "/data/media/movies" #docker path
       library_path: "/mnt/user/media/movies" #host path
 
 output:
