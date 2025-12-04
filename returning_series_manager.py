@@ -126,7 +126,10 @@ def has_real_media(show_path, stub_suffix):
 def create_stub_file(show_path, show_title, template_file, stub_suffix):
     """Creates the dummy file if missing."""
     safe_title = "".join([c for c in show_title if c.isalpha() or c.isdigit() or c in ' .-_']).strip()
-    stub_filename = f"{safe_title}{stub_suffix}"
+    
+    # NEW: Force S00E99 format so Plex detects it as a special
+    stub_filename = f"{safe_title} - S00E99{stub_suffix}"
+    
     stub_path = os.path.join(show_path, stub_filename)
 
     if os.path.exists(stub_path):
