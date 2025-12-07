@@ -148,13 +148,14 @@ assets:
   grab_originals: true
 
 # =======================================================
-#  TSSK SETTINGS (The Overlay Manager Scripts)
+#  TSSK SETTINGS (TV-show-status-for-Kometa)
+#  https://github.com/netplexflix/TV-show-status-for-Kometa
 #  Run after Asset Grabber, but before Kometa.
 # =======================================================
 tssk:
   enabled: true
 
-# List all TSSK scripts you want to run here
+# List all TSSK scripts you want to run here or other sciprts
 scripts:
   - "path/to/tssk_sonarr_1.py"
   - "path/to/tssk_sonarr_2.py"
