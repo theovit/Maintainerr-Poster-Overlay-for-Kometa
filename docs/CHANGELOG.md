@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-03-17
+### Added
+- `--dry-run` flag for `returning_series_manager.py`: previews stub creation/deletion and Plex label changes without making any modifications
+- Season list caching in `asset-grabber.py`: skips Plex `item.seasons()` API calls when season count is unchanged and all poster files exist on disk; cache stored in `asset_season_cache.json`
+
+### Fixed
+- `install.sh` config wizard no longer corrupts `config.yaml` when passwords or paths contain `"`, `$`, or `\` — values now passed via environment variables to the Python writer instead of shell string interpolation
+- Sonarr instances in `install.sh` wizard now collect `sonarr_base_path` + `local_base_path` (`path_mapping`) instead of single `library_path`, matching actual config format
+- `returning_series_manager.py` Plex connection no longer silently skipped when config uses flat plex keys (`plex_url`/`plex_token`) — added fallback for both key formats
+
+### Changed
+- README updated: corrected Plex config keys, Sonarr `path_mapping` format, install instructions, scripts section, and removed unimplemented `--watch` flag reference
+
 ## [0.6.0] — 2026-03-17
 ### Added
 - Generic external scripts system in `trigger.sh`: step 2 now runs any list of scripts defined in root-level `scripts:` config key, with per-script `name`, `path`, `args`, and `enabled` fields; supports both Python and shell scripts, each run in their own subshell so `cd` changes don't bleed between scripts

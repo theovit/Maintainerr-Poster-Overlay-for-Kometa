@@ -67,9 +67,6 @@ if [ ! -f "config.yaml" ]; then cp config.yaml.template config.yaml; fi
 echo -e "${BLUE}=== Phase 3: Configuration Wizard ===${NC}"
 echo -e "${CYAN}Press Enter to accept defaults [shown in brackets].${NC}"
 
-# --- JSON BUILDER START ---
-JSON_PAYLOAD="{"
-
 # ----------------------------------------
 # SECTION A: CONNECT
 # ----------------------------------------
@@ -81,35 +78,42 @@ read -r -p "  Host IP/URL [192.168.1.100]: " M_HOST; M_HOST=${M_HOST:-192.168.1.
 read -r -p "  Port [6246]: " M_PORT; M_PORT=${M_PORT:-6246}
 read -r -p "  User [admin]: " M_USER; M_USER=${M_USER:-admin}
 read -r -p "  Password: " M_PASS
-
-JSON_PAYLOAD+="\"maintainerr\": {\"host\": \"$M_HOST\", \"port\": $M_PORT, \"user\": \"$M_USER\", \"pass\": \"$M_PASS\"},"
+export CFG_M_HOST="$M_HOST"
+export CFG_M_PORT="$M_PORT"
+export CFG_M_USER="$M_USER"
+export CFG_M_PASS="$M_PASS"
 
 # Plex
 echo -e "${YELLOW}> Plex${NC}"
 read -r -p "  Plex URL [http://192.168.1.100:32400]: " P_URL; P_URL=${P_URL:-http://192.168.1.100:32400}
 read -r -p "  Plex Token: " P_TOKEN
-
-JSON_PAYLOAD+="\"plex\": {\"url\": \"$P_URL\", \"token\": \"$P_TOKEN\"},"
+export CFG_P_URL="$P_URL"
+export CFG_P_TOKEN="$P_TOKEN"
 
 # Sonarr Loop
 echo -e "${YELLOW}> Sonarr Instances${NC}"
 echo -e "  (We will ask for each instance one by one. Say 'n' when finished.)"
-SONARR_LIST="["
+SONARR_COUNT=0
 while true; do
     read -r -p "  Add a Sonarr Instance? (y/n) [n]: " ADD_SONARR
     if [[ ! "$ADD_SONARR" =~ ^[Yy]$ ]]; then break; fi
-    read -r -p "    Name (e.g. 'Anime'): " S_NAME
+    read -r -p "    Name (e.g. 'TV Shows'): " S_NAME
     read -r -p "    URL (e.g. http://192.168.1.50:8989): " S_URL
     read -r -p "    API Key: " S_KEY
-    read -r -p "    Library Path (e.g. /mnt/media/anime): " S_PATH
-    SONARR_LIST+="{\"name\": \"$S_NAME\", \"url\": \"$S_URL\", \"api_key\": \"$S_KEY\", \"library_path\": \"$S_PATH\"},"
+    read -r -p "    Sonarr Base Path (path as Sonarr sees it, e.g. /data/tv): " S_SONARR_PATH
+    read -r -p "    Local Base Path (path as this script sees it, e.g. /mnt/media/tv): " S_LOCAL_PATH
+    export "CFG_SONARR_${SONARR_COUNT}_NAME=$S_NAME"
+    export "CFG_SONARR_${SONARR_COUNT}_URL=$S_URL"
+    export "CFG_SONARR_${SONARR_COUNT}_KEY=$S_KEY"
+    export "CFG_SONARR_${SONARR_COUNT}_SONARR_PATH=$S_SONARR_PATH"
+    export "CFG_SONARR_${SONARR_COUNT}_LOCAL_PATH=$S_LOCAL_PATH"
+    SONARR_COUNT=$((SONARR_COUNT+1))
 done
-SONARR_LIST="${SONARR_LIST%,}]"
-JSON_PAYLOAD+="\"sonarr\": $SONARR_LIST,"
+export CFG_SONARR_COUNT=$SONARR_COUNT
 
 # Radarr Loop
 echo -e "${YELLOW}> Radarr Instances${NC}"
-RADARR_LIST="["
+RADARR_COUNT=0
 while true; do
     read -r -p "  Add a Radarr Instance? (y/n) [n]: " ADD_RADARR
     if [[ ! "$ADD_RADARR" =~ ^[Yy]$ ]]; then break; fi
@@ -117,10 +121,13 @@ while true; do
     read -r -p "    URL (e.g. http://192.168.1.50:7878): " R_URL
     read -r -p "    API Key: " R_KEY
     read -r -p "    Library Path (e.g. /mnt/media/movies): " R_PATH
-    RADARR_LIST+="{\"name\": \"$R_NAME\", \"url\": \"$R_URL\", \"api_key\": \"$R_KEY\", \"library_path\": \"$R_PATH\"},"
+    export "CFG_RADARR_${RADARR_COUNT}_NAME=$R_NAME"
+    export "CFG_RADARR_${RADARR_COUNT}_URL=$R_URL"
+    export "CFG_RADARR_${RADARR_COUNT}_KEY=$R_KEY"
+    export "CFG_RADARR_${RADARR_COUNT}_PATH=$R_PATH"
+    RADARR_COUNT=$((RADARR_COUNT+1))
 done
-RADARR_LIST="${RADARR_LIST%,}]"
-JSON_PAYLOAD+="\"radarr\": $RADARR_LIST,"
+export CFG_RADARR_COUNT=$RADARR_COUNT
 
 
 # ----------------------------------------
@@ -152,6 +159,10 @@ echo -e "  [y] Immediate: Show overlay as soon as item is in collection."
 echo -e "  [n] Late: Only show overlay when Warning threshold is hit."
 read -r -p "  Use Collection Limit as Trigger? (y/n) [y]: " IN_LIMIT
 if [[ "$IN_LIMIT" =~ ^[Nn]$ ]]; then LIMIT_BOOL="false"; else LIMIT_BOOL="true"; fi
+
+export CFG_ASSET_BOOL="$ASSET_BOOL"
+export CFG_RET_BOOL="$RET_BOOL"
+export CFG_LIMIT_BOOL="$LIMIT_BOOL"
 
 
 # ----------------------------------------
@@ -188,30 +199,34 @@ RET_TEMP=""
 if [ "$RET_BOOL" == "true" ]; then
     DEF_RET="$K_ROOT/overlays/returning_series.yaml"
     DEF_TEMP="$K_ROOT/assets/blank.mp4"
-    
+
     echo -e "${CYAN}Returning Series:${NC}"
     read -r -p "  Overlay Path    [$DEF_RET]: " OUT_RET; OUT_RET=${OUT_RET:-$DEF_RET}
     read -r -p "  Blank Template  [$DEF_TEMP]: " RET_TEMP; RET_TEMP=${RET_TEMP:-$DEF_TEMP}
 fi
 
 # 5. External Scripts (Conditional Loop)
-SCRIPTS_LIST="[]"
+SCRIPTS_COUNT=0
 if [ "$TSSK_BOOL" == "true" ]; then
     echo -e "${CYAN}External Scripts:${NC}"
     echo -e "  Add scripts to run after asset grabber, before Kometa."
-    SCRIPTS_LIST="["
     while true; do
         read -r -p "  Add a script? (y/n) [y]: " ADD_SCRIPT
         if [[ "$ADD_SCRIPT" =~ ^[Nn]$ ]]; then break; fi
         read -r -p "    Name (e.g. 'TSSK TV'): " SCRIPT_NAME
         read -r -p "    Path: " SCRIPT_PATH
-        SCRIPTS_LIST+="{\"name\": \"$SCRIPT_NAME\", \"path\": \"$SCRIPT_PATH\", \"enabled\": true},"
+        export "CFG_SCRIPT_${SCRIPTS_COUNT}_NAME=$SCRIPT_NAME"
+        export "CFG_SCRIPT_${SCRIPTS_COUNT}_PATH=$SCRIPT_PATH"
+        SCRIPTS_COUNT=$((SCRIPTS_COUNT+1))
     done
-    SCRIPTS_LIST="${SCRIPTS_LIST%,}]"
 fi
+export CFG_SCRIPTS_COUNT=$SCRIPTS_COUNT
 
-JSON_PAYLOAD+="\"paths\": {\"movies\": \"$OUT_MOV\", \"shows\": \"$OUT_TV\", \"returning\": \"$OUT_RET\", \"assets\": \"$OUT_AST\", \"ret_template\": \"$RET_TEMP\"},"
-JSON_PAYLOAD+="\"scripts\": $SCRIPTS_LIST,"
+export CFG_OUT_MOV="$OUT_MOV"
+export CFG_OUT_TV="$OUT_TV"
+export CFG_OUT_AST="$OUT_AST"
+export CFG_OUT_RET="$OUT_RET"
+export CFG_RET_TEMP="$RET_TEMP"
 
 
 # ----------------------------------------
@@ -222,18 +237,20 @@ read -r -p "Wait Time (seconds) before running [$300]: " EXEC_WAIT; EXEC_WAIT=${
 read -r -p "Critical Days (Red) [3]: " TRIG_CRIT; TRIG_CRIT=${TRIG_CRIT:-3}
 read -r -p "Warning Days (Orange) [7]: " TRIG_WARN; TRIG_WARN=${TRIG_WARN:-7}
 
-JSON_PAYLOAD+="\"behavior\": {\"wait\": $EXEC_WAIT, \"crit\": $TRIG_CRIT, \"warn\": $TRIG_WARN, \"assets_enabled\": $ASSET_BOOL, \"returning_enabled\": $RET_BOOL, \"use_limit\": $LIMIT_BOOL}}"
+export CFG_EXEC_WAIT="$EXEC_WAIT"
+export CFG_TRIG_CRIT="$TRIG_CRIT"
+export CFG_TRIG_WARN="$TRIG_WARN"
 
 # --- PYTHON WRITER ---
+# Values are passed via environment variables (not shell string interpolation)
+# so passwords and paths with special characters are handled safely.
 echo -e "\n${BLUE}Saving configuration...${NC}"
 
-./venv/bin/python3 - <<END_PYTHON
-import yaml, json, os
+./venv/bin/python3 - <<'END_PYTHON'
+import yaml, os
 
-try:
-    data = json.loads('$JSON_PAYLOAD')
-except Exception as e:
-    print(f"JSON Error: {e}"); exit(1)
+def env(key, default=''):
+    return os.environ.get(key, default)
 
 config_path = 'config.yaml'
 with open(config_path, 'r') as f:
@@ -241,59 +258,93 @@ with open(config_path, 'r') as f:
 
 # 1. Update Connect
 c = config.get('connect', {})
-c['maintainerr'].update({
-    'maintainerr_host': data['maintainerr']['host'],
-    'maintainerr_port': data['maintainerr']['port'],
-    'maintainerr_user': data['maintainerr']['user']
+c.setdefault('maintainerr', {}).update({
+    'maintainerr_host': env('CFG_M_HOST'),
+    'maintainerr_port': int(env('CFG_M_PORT', '6246')),
+    'maintainerr_user': env('CFG_M_USER'),
 })
-if data['maintainerr']['pass']: c['maintainerr']['maintainerr_pass'] = data['maintainerr']['pass']
-c['plex']['url'] = data['plex']['url']
-if data['plex']['token']: c['plex']['token'] = data['plex']['token']
-if data['sonarr']: c['sonarr_instances'] = data['sonarr']
-if data['radarr']: c['radarr_instances'] = data['radarr']
+if env('CFG_M_PASS'):
+    c['maintainerr']['maintainerr_pass'] = env('CFG_M_PASS')
+
+c.setdefault('plex', {})['url'] = env('CFG_P_URL')
+if env('CFG_P_TOKEN'):
+    c['plex']['token'] = env('CFG_P_TOKEN')
+
+sonarr_count = int(env('CFG_SONARR_COUNT', '0'))
+if sonarr_count > 0:
+    c['sonarr_instances'] = [
+        {
+            'name': env(f'CFG_SONARR_{i}_NAME'),
+            'url': env(f'CFG_SONARR_{i}_URL'),
+            'api_key': env(f'CFG_SONARR_{i}_KEY'),
+            'path_mapping': {
+                'sonarr_base_path': env(f'CFG_SONARR_{i}_SONARR_PATH'),
+                'local_base_path': env(f'CFG_SONARR_{i}_LOCAL_PATH'),
+            }
+        }
+        for i in range(sonarr_count)
+    ]
+
+radarr_count = int(env('CFG_RADARR_COUNT', '0'))
+if radarr_count > 0:
+    c['radarr_instances'] = [
+        {
+            'name': env(f'CFG_RADARR_{i}_NAME'),
+            'url': env(f'CFG_RADARR_{i}_URL'),
+            'api_key': env(f'CFG_RADARR_{i}_KEY'),
+            'library_path': env(f'CFG_RADARR_{i}_PATH'),
+        }
+        for i in range(radarr_count)
+    ]
+
 config['connect'] = c
 
 # 2. Update Paths
 config['output'] = config.get('output', {})
-config['output']['movies_path'] = data['paths']['movies']
-config['output']['shows_path'] = data['paths']['shows']
-if data['paths']['returning']:
-    config['output']['returning_path'] = data['paths']['returning']
+config['output']['movies_path'] = env('CFG_OUT_MOV')
+config['output']['shows_path'] = env('CFG_OUT_TV')
+if env('CFG_OUT_RET'):
+    config['output']['returning_path'] = env('CFG_OUT_RET')
 
 # 3. Assets
 config['assets'] = config.get('assets', {})
-config['assets']['enabled'] = data['behavior']['assets_enabled']
-if data['paths']['assets']:
-    config['assets']['path'] = data['paths']['assets']
+config['assets']['enabled'] = (env('CFG_ASSET_BOOL') == 'true')
+if env('CFG_OUT_AST'):
+    config['assets']['path'] = env('CFG_OUT_AST')
 
 # 4. Returning Series
 config['returning'] = config.get('returning', {})
-config['returning']['generate_overlay'] = data['behavior']['returning_enabled']
-if data['paths']['ret_template']:
-    config['returning']['template_file'] = data['paths']['ret_template']
+config['returning']['generate_overlay'] = (env('CFG_RET_BOOL') == 'true')
+if env('CFG_RET_TEMP'):
+    config['returning']['template_file'] = env('CFG_RET_TEMP')
 
 # 5. External Scripts
-if data['scripts']:
-    config['scripts'] = data['scripts']
+scripts_count = int(env('CFG_SCRIPTS_COUNT', '0'))
+if scripts_count > 0:
+    config['scripts'] = [
+        {'name': env(f'CFG_SCRIPT_{i}_NAME'), 'path': env(f'CFG_SCRIPT_{i}_PATH'), 'enabled': True}
+        for i in range(scripts_count)
+    ]
 elif 'scripts' not in config:
     config['scripts'] = []
 
 # 6. Behavior
 config['execution'] = config.get('execution', {})
-config['execution']['wait_time'] = data['behavior']['wait']
+config['execution']['wait_time'] = int(env('CFG_EXEC_WAIT', '300'))
 config['triggers'] = config.get('triggers', {})
-config['triggers']['critical_days'] = data['behavior']['crit']
-config['triggers']['warning_days'] = data['behavior']['warn']
-config['triggers']['use_maintainerr_limit'] = data['behavior']['use_limit']
+config['triggers']['critical_days'] = int(env('CFG_TRIG_CRIT', '3'))
+config['triggers']['warning_days'] = int(env('CFG_TRIG_WARN', '7'))
+config['triggers']['use_maintainerr_limit'] = (env('CFG_LIMIT_BOOL') == 'true')
 
 with open(config_path, 'w') as f:
     yaml.dump(config, f, sort_keys=False)
+
+print("Configuration saved successfully.")
 END_PYTHON
 
 # 6. Final Path Linking
 VENV_PYTHON=$(readlink -f ./venv/bin/python3)
 echo -e "${BLUE}Linking environment...${NC}"
-sed_i "s|python_cmd: \"python3\"|python_cmd: \"$VENV_PYTHON\"|g" config.yaml
 sed_i "s|python_cmd: \"python3\"|python_cmd: \"$VENV_PYTHON\"|g" config.yaml
 sed_i "s|eval \$(python3 -c|eval \$($VENV_PYTHON -c|g" trigger.sh
 

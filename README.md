@@ -21,17 +21,16 @@ Clone the repository:
     git clone https://github.com/theovit/Maintainerr-Poster-Overlay-for-Kometa.git
     cd Maintainerr-Poster-Overlay-for-Kometa
 
-Install Dependencies:
+Run the interactive installer (recommended):
 
-    pip3 install -r requirements.txt
+    chmod +x install.sh
+    ./install.sh
 
-Configure: Copy the template and edit your settings.
+Or manual setup:
 
+    pip3 install requests PyYAML PlexAPI
     cp config.yaml.template config.yaml
     nano config.yaml
-
-Make the wrapper executable:
-
     chmod +x trigger.sh
 
 # ⚙️ Configuration
@@ -48,30 +47,34 @@ Define your connection details for Maintainerr, Plex, and your *arrs.
     maintainerr_pass: "your#secure#password"
 	
   plex:
-    plex_url: "http://192.168.1.100:32400"
-    plex_token: "YOUR_PLEX_TOKEN"
-	
+    url: "http://192.168.1.100:32400"
+    token: "YOUR_PLEX_TOKEN"
+
   sonarr_instances:
     - name: "Sonarr - Anime"
       url: "http://192.168.1.50:8989"
       api_key: "API_KEY_HERE"
-      library_path: "/mnt/user/media/anime" #host path
+      path_mapping:
+        sonarr_base_path: "/data/anime"         # path as Sonarr sees it
+        local_base_path: "/mnt/user/media/anime" # path as this script sees it
 
     - name: "Sonarr - TV"
       url: "http://192.168.1.50:8990"
       api_key: "API_KEY_HERE"
-      library_path: "/mnt/user/media/tv" #host path
-	  
+      path_mapping:
+        sonarr_base_path: "/data/tv"
+        local_base_path: "/mnt/user/media/tv"
+
   radarr_instances:
     - name: "Radarr - 4K"
       url: "http://192.168.1.50:7878"
       api_key: "API_KEY_HERE"
-      library_path: "/mnt/user/media/movies_4k" #host path
+      library_path: "/mnt/user/media/movies_4k"
 
     - name: "Radarr - 1080p"
       url: "http://192.168.1.50:7879"
       api_key: "API_KEY_HERE"
-      library_path: "/mnt/user/media/movies" #host path```
+      library_path: "/mnt/user/media/movies"```
 
 ### 2. Output Paths
 Where the generated Kometa YAML files will be saved.
@@ -110,15 +113,16 @@ Ensures you always apply overlays to clean artwork.
         - "Movies"
         - "TV Shows"
 
-### 6. TSSK (External Scripts)
-Run other python scripts (TV Show Status for Kometa scripts) as part of this pipeline.
+### 6. External Scripts
+Run other Python scripts (e.g. TSSK) as part of this pipeline.
 
-    tssk:
-      enabled: true
-    
     scripts:
-      - "/path/to/tssk_script_1.py"
-      - "/path/to/tssk_script_2.py"
+      - name: "TSSK TV Shows"
+        path: "/path/to/TSSK/TSSK.py"
+        enabled: true
+      - name: "TSSK Anime"
+        path: "/path/to/TSSK_Anime/TSSK.py"
+        enabled: true
 
 ### 7. Execution & Paths
 Configure the wrapper behavior and file locations.
@@ -145,7 +149,7 @@ Configures the dummy file creation for upcoming shows.
     returning:
       generate_overlay: true
       template_file: "/path/to/assets/blank.mp4" 
-      stub_suffix: "- kometa-overlay-lock.mp4"
+      stub_suffix: " - kometa-overlay-lock.mp4"
       
       overlay_style:
         text: "NO EPISODES YET"
@@ -187,10 +191,7 @@ Add the generated overlay files to your main Kometa `config.yml`.
 ### Run immediately (Skip debounce timer):
 `./trigger.sh --now`
 
-### Run the full pipeline and WATCH logs live:
-`./trigger.sh --watch`
-
 ### Run individual modules:
 * **Overlay Generator:** `python3 kometa_maintainerr_overlay_yaml.py`
 * **Returning Series:** `python3 returning_series_manager.py`
-* **Asset Grabber:** `python3 asset_grabber.py`
+* **Asset Grabber:** `python3 asset-grabber.py`

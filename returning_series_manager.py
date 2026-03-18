@@ -4,6 +4,7 @@ import yaml
 import requests
 import logging
 import shutil
+import argparse
 
 # =======================================================
 # CONFIGURATION & CONSTANTS
@@ -170,10 +171,14 @@ def find_plex_show(plex, tmdb_id=None, tvdb_id=None, title=None):
 
     return None
 
-def cleanup_real_media(plex, show_path, stub_suffix, tmdb_id=None, tvdb_id=None, title=None):
+def cleanup_real_media(plex, show_path, stub_suffix, tmdb_id=None, tvdb_id=None, title=None, dry_run=False):
     """Deletes stub files and removes Plex labels for shows with real media."""
+    if dry_run:
+        logging.info(f"[DRY RUN] '{title}' has real media. Would remove stub and label.")
+        return
+
     logging.info(f"Cleanup: '{title}' has real media. Removing stub and label.")
-    
+
     # 1. Delete stub file(s)
     stubs_found = 0
     if os.path.exists(show_path):
@@ -193,18 +198,21 @@ def cleanup_real_media(plex, show_path, stub_suffix, tmdb_id=None, tvdb_id=None,
     # 2. Remove Plex Label
     remove_plex_label(plex, tmdb_id, tvdb_id, title)
 
-def process_plex_label(plex, tmdb_id=None, tvdb_id=None, title=None, stub_suffix=None):
+def process_plex_label(plex, tmdb_id=None, tvdb_id=None, title=None, stub_suffix=None, dry_run=False):
     """Labels show in Plex and marks stub episode as watched."""
     if not plex: return
 
     found_show = find_plex_show(plex, tmdb_id=tmdb_id, tvdb_id=tvdb_id, title=title)
-    
+
     if found_show:
         # 1. Add Label (if missing)
         current_labels = [l.tag for l in found_show.labels]
         if PLEX_LABEL_NAME not in current_labels:
-            logging.info(f"  > Plex: Adding label '{PLEX_LABEL_NAME}' to '{found_show.title}'")
-            found_show.addLabel(PLEX_LABEL_NAME)
+            if dry_run:
+                logging.info(f"  [DRY RUN] Would add label '{PLEX_LABEL_NAME}' to '{found_show.title}'")
+            else:
+                logging.info(f"  > Plex: Adding label '{PLEX_LABEL_NAME}' to '{found_show.title}'")
+                found_show.addLabel(PLEX_LABEL_NAME)
         else:
             logging.debug(f"  > Plex: Label already exists on '{found_show.title}'")
 
@@ -219,19 +227,22 @@ def process_plex_label(plex, tmdb_id=None, tvdb_id=None, title=None, stub_suffix
                         if part.file and part.file.endswith(stub_suffix):
                             found_stub = True
                             if not episode.isWatched:
-                                logging.info(f"  > Plex: Marking stub episode '{episode.title}' as watched.")
-                                episode.markWatched()
+                                if dry_run:
+                                    logging.info(f"  [DRY RUN] Would mark stub episode '{episode.title}' as watched.")
+                                else:
+                                    logging.info(f"  > Plex: Marking stub episode '{episode.title}' as watched.")
+                                    episode.markWatched()
                             else:
                                 logging.debug(f"  > Plex: Stub episode '{episode.title}' already watched.")
-                            return # Exit after finding and processing stub
-        
+                            return  # Exit after finding and processing stub
+
         if not found_stub:
             logging.debug(f"  > Plex: Stub file for '{found_show.title}' not found in Plex yet.")
     else:
         id_str = f"TMDb:{tmdb_id}" if tmdb_id else f"TVDb:{tvdb_id}"
         logging.warning(f"  > Plex: Could not find show '{title}' ({id_str}).")
 
-def remove_plex_label(plex, tmdb_id=None, tvdb_id=None, title=None):
+def remove_plex_label(plex, tmdb_id=None, tvdb_id=None, title=None, dry_run=False):
     """Removes the specific lock label from a show in Plex."""
     if not plex: return
 
@@ -240,25 +251,31 @@ def remove_plex_label(plex, tmdb_id=None, tvdb_id=None, title=None):
     if found_show:
         current_labels = [l.tag for l in found_show.labels]
         if PLEX_LABEL_NAME in current_labels:
-            logging.info(f"  > Cleanup: Removing Plex label for '{found_show.title}'")
-            found_show.removeLabel(PLEX_LABEL_NAME)
+            if dry_run:
+                logging.info(f"  [DRY RUN] Would remove Plex label from '{found_show.title}'")
+            else:
+                logging.info(f"  > Cleanup: Removing Plex label for '{found_show.title}'")
+                found_show.removeLabel(PLEX_LABEL_NAME)
         else:
             logging.debug(f"  > Cleanup: Plex label not found on '{found_show.title}', nothing to do.")
     else:
         id_str = f"TMDb:{tmdb_id}" if tmdb_id else f"TVDb:{tvdb_id}"
         logging.warning(f"  > Cleanup: Could not find Plex show '{title}' ({id_str}) to remove label.")
 
-def create_stub_file(show_path, show_title, template_file, stub_suffix):
+def create_stub_file(show_path, show_title, template_file, stub_suffix, dry_run=False):
     """Creates the dummy file if missing."""
     safe_title = "".join([c for c in show_title if c.isalpha() or c.isdigit() or c in ' .-_']).strip()
-    
+
     # NEW: Force S00E99 format so Plex detects it as a special
     stub_filename = f"{safe_title} - S00E99{stub_suffix}"
-    
+
     stub_path = os.path.join(show_path, stub_filename)
 
     if os.path.exists(stub_path):
-        # logging.debug(f"  > Stub already exists: {stub_filename}")
+        return True
+
+    if dry_run:
+        logging.info(f"  [DRY RUN] Would create stub: {stub_path}")
         return True
 
     if not os.path.exists(show_path):
@@ -302,7 +319,7 @@ def validate_font(style_dict):
             del style_dict['font']
     return style_dict
 
-def process_sonarr_instance(instance, plex_server, config_settings):
+def process_sonarr_instance(instance, plex_server, config_settings, dry_run=False):
     """
     Processes a single Sonarr instance.
     Returns a dictionary with 'tmdb_ids' and 'tvdb_ids'.
@@ -356,7 +373,7 @@ def process_sonarr_instance(instance, plex_server, config_settings):
 
         if has_files:
             # This show has files, so it's a candidate for cleanup
-            cleanup_real_media(plex_server, local_show_path, stub_suffix, tmdb_id, tvdb_id, title)
+            cleanup_real_media(plex_server, local_show_path, stub_suffix, tmdb_id, tvdb_id, title, dry_run)
         else:
             # This show has NO files, so it's a candidate for the overlay
             if not tmdb_id and not tvdb_id:
@@ -364,13 +381,13 @@ def process_sonarr_instance(instance, plex_server, config_settings):
                 continue
 
             logging.info(f"[{name}] Processing: {title} (TMDb: {tmdb_id}, TVDb: {tvdb_id}) | Status: {status}")
-            
+
             # 1. Create Stub File
-            create_stub_file(local_show_path, title, template_file, stub_suffix)
-            
+            create_stub_file(local_show_path, title, template_file, stub_suffix, dry_run)
+
             # 2. Process Plex Label & Watched Status
             if plex_server:
-                process_plex_label(plex_server, tmdb_id, tvdb_id, title, stub_suffix)
+                process_plex_label(plex_server, tmdb_id, tvdb_id, title, stub_suffix, dry_run)
             
             # 3. Add to correct list for YAML generation
             if tmdb_id:
@@ -382,8 +399,16 @@ def process_sonarr_instance(instance, plex_server, config_settings):
     return instance_ids
 
 def main():
+    parser = argparse.ArgumentParser(description='Returning Series Manager')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Preview stub create/delete and Plex actions without making any changes')
+    args = parser.parse_args()
+    dry_run = args.dry_run
+
     # 1. Basic Setup (Console)
     setup_logging('INFO')
+    if dry_run:
+        logging.info("*** DRY RUN MODE — no changes will be made ***")
     logging.info("Starting Returning Series Manager (Multi-Instance)...")
     config = load_config()
     
@@ -431,7 +456,7 @@ def main():
 
     for instance in sonarr_instances:
         logging.info(f"--- Starting Instance: {instance.get('name')} ---")
-        instance_result = process_sonarr_instance(instance, plex_server, config_settings)
+        instance_result = process_sonarr_instance(instance, plex_server, config_settings, dry_run)
         master_ids['tmdb_ids'].extend(instance_result['tmdb_ids'])
         master_ids['tvdb_ids'].extend(instance_result['tvdb_ids'])
         logging.info(f"--- Instance {instance.get('name')} finished ---")
