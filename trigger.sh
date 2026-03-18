@@ -117,7 +117,7 @@ if [ -n "$_CONFIG_VARS" ]; then
     echo "$_CONFIG_VARS" > "$CONFIG_CACHE"
 elif [ -f "$CONFIG_CACHE" ]; then
     # python3 or PyYAML unavailable (e.g. Arr Docker container) — use cached config
-    echo "[INFO] python3/PyYAML unavailable. Using cached config." >&2
+    echo "[INFO] python3/PyYAML unavailable. Using cached config."
     source "$CONFIG_CACHE"
 else
     echo "[ERROR] Cannot parse config.yaml (python3/PyYAML missing) and no cache exists." >&2
