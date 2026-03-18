@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import requests
 import yaml
 import logging
@@ -151,6 +152,7 @@ class KometaAssetGrabber:
                     for chunk in response.iter_content(1024):
                         f.write(chunk)
                 self.logger.info(f"Downloaded: {os.path.basename(final_filepath)}")
+                time.sleep(0.2)
             else:
                 self.logger.error(f"HTTP {response.status_code} for {full_url}")
         except Exception as e:
@@ -207,20 +209,25 @@ class KometaAssetGrabber:
                             self.logger.error(f"Error creating folder: {asset_name}")
                             continue
 
-                    # 3. Download Poster
-                    poster_url = self.get_best_poster(item)
-                    if poster_url:
-                        self.download_image(poster_url, os.path.join(target_dir, "poster.jpg"), plex_url, plex_token)
+                    # 3. Download Poster (skip API call if already on disk)
+                    poster_path = os.path.join(target_dir, "poster.jpg")
+                    poster_base = os.path.splitext(poster_path)[0]
+                    if not os.path.exists(poster_base + ".jpg") and not os.path.exists(poster_base + ".webp"):
+                        poster_url = self.get_best_poster(item)
+                        if poster_url:
+                            self.download_image(poster_url, poster_path, plex_url, plex_token)
 
-                    # 4. Handle Seasons
+                    # 4. Handle Seasons (skip API call per season if already on disk)
                     if item.type == 'show':
                         for season in item.seasons():
                             season_idx = int(season.index)
                             filename = "Season00.jpg" if season_idx == 0 else f"Season{season_idx:02d}.jpg"
-                            
-                            s_poster = self.get_best_poster(season)
-                            if s_poster:
-                                self.download_image(s_poster, os.path.join(target_dir, filename), plex_url, plex_token)
+                            season_path = os.path.join(target_dir, filename)
+                            season_base = os.path.splitext(season_path)[0]
+                            if not os.path.exists(season_base + ".jpg") and not os.path.exists(season_base + ".webp"):
+                                s_poster = self.get_best_poster(season)
+                                if s_poster:
+                                    self.download_image(s_poster, season_path, plex_url, plex_token)
                                 
             except Exception as e:
                 self.logger.error(f"Could not process library {lib_name}: {e}")
