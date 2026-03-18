@@ -249,6 +249,12 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
     # --------------------------------
     # 5. Kometa
     # --------------------------------
+    KOMETA_BG_PID=$(pgrep -f "kometa\.py" 2>/dev/null || true)
+    if [ -n "$KOMETA_BG_PID" ]; then
+        echo "[$(date '+%H:%M:%S')] Stopping background Kometa (PID: $KOMETA_BG_PID)..." >> "$LOG_FILE"
+        kill -TERM $KOMETA_BG_PID 2>/dev/null || true
+        sleep 3
+    fi
     KOMETA_DIR=$(dirname "$KOMETA_SCRIPT")
     if [ -d "$KOMETA_DIR" ] && [ "$KOMETA_DIR" != "." ]; then
         echo "[$(date '+%H:%M:%S')] Step 5: Running Kometa (Switching to $KOMETA_DIR)..." >> "$LOG_FILE"
@@ -259,6 +265,12 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
         $PYTHON_CMD "$KOMETA_SCRIPT" $KOMETA_ARGS >> "$LOG_FILE" 2>&1
     fi
 
+    if [ -n "$KOMETA_BG_PID" ] && [ -d "$KOMETA_DIR" ]; then
+        echo "[$(date '+%H:%M:%S')] Restarting background Kometa..." >> "$LOG_FILE"
+        cd "$KOMETA_DIR"
+        nohup $PYTHON_CMD "$(basename "$KOMETA_SCRIPT")" --log-requests >> "$KOMETA_DIR/kometa.log" 2>&1 &
+        echo "[$(date '+%H:%M:%S')] Background Kometa restarted (PID: $!)" >> "$LOG_FILE"
+    fi
     echo "[$(date '+%H:%M:%S')] All tasks completed." >> "$LOG_FILE"
     exit 0
 fi

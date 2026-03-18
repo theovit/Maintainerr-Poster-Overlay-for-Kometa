@@ -370,7 +370,7 @@ def validate_font(style_dict):
 def process_sonarr_instance(instance, plex_server, config_settings, dry_run=False):
     """
     Processes a single Sonarr instance.
-    Returns a dictionary with 'tmdb_ids' and 'tvdb_ids'.
+    Returns 'dated' and 'undated' buckets (shows with/without nextAiring).
     """
     name = instance.get('name', 'Unknown')
     url = instance.get('url')
@@ -383,7 +383,7 @@ def process_sonarr_instance(instance, plex_server, config_settings, dry_run=Fals
 
     if not all([url, api_key, sonarr_base_path, local_base_path]):
         logging.error(f"[{name}] Skipping: Missing url, api_key, or path_mapping settings.")
-        return {'tmdb_ids': [], 'tvdb_ids': []}
+        return {'dated':{'tmdb_ids':[],'tvdb_ids':[]},'undated':{'tmdb_ids':[],'tvdb_ids':[]}}
 
     ensure_sonarr_settings(name, url, api_key)
 
@@ -392,7 +392,7 @@ def process_sonarr_instance(instance, plex_server, config_settings, dry_run=Fals
     remonitor_on_first_episode = config_settings.get('remonitor_on_first_episode', True)
 
     series_list = get_sonarr_series(name, url, api_key)
-    instance_ids = {'tmdb_ids': [], 'tvdb_ids': []}
+    instance_ids = {'dated':{'tmdb_ids':[],'tvdb_ids':[]},'undated':{'tmdb_ids':[],'tvdb_ids':[]}}
 
     logging.info(f"[{name}] Scanning {len(series_list)} shows...")
 
@@ -440,17 +440,13 @@ def process_sonarr_instance(instance, plex_server, config_settings, dry_run=Fals
             if plex_server:
                 process_plex_label(plex_server, tmdb_id, tvdb_id, title, stub_suffix, dry_run)
             
-            # 3. Add to overlay list — skip shows with a known air date,
-            #    they get the date overlay text instead of "NO EPISODES YET"
-            if show.get('nextAiring'):
-                logging.debug(f"  > [{name}] '{title}' has nextAiring {show['nextAiring'][:10]} — using date overlay instead of NO EPISODES YET")
-            else:
-                if tmdb_id:
-                    instance_ids['tmdb_ids'].append(tmdb_id)
-                if tvdb_id:
-                    instance_ids['tvdb_ids'].append(tvdb_id)
+            # 3. Split: dated (known return) vs undated (TBA)
+            bucket = 'dated' if show.get('nextAiring') else 'undated'
+            if tmdb_id: instance_ids[bucket]['tmdb_ids'].append(tmdb_id)
+            if tvdb_id: instance_ids[bucket]['tvdb_ids'].append(tvdb_id)
 
-    logging.info(f"[{name}] Finished. TMDb IDs: {len(instance_ids['tmdb_ids'])}, TVDb IDs: {len(instance_ids['tvdb_ids'])}")
+    d=instance_ids['dated']; u=instance_ids['undated']
+    logging.info(f"[{name}] Dated: {len(d['tmdb_ids'])+len(d['tvdb_ids'])}, Undated: {len(u['tmdb_ids'])+len(u['tvdb_ids'])}")
     return instance_ids
 
 def format_air_date(date_str, date_format="%b %-d"):
@@ -612,65 +608,44 @@ def main():
             logging.error(f"Failed to connect to Plex: {e}")
 
     # 5. PROCESS INSTANCES
-    master_ids = {'tmdb_ids': [], 'tvdb_ids': []}
-
+    master = {'dated': {'tmdb_ids': [], 'tvdb_ids': []}, 'undated': {'tmdb_ids': [], 'tvdb_ids': []}}
     for instance in sonarr_instances:
         logging.info(f"--- Starting Instance: {instance.get('name')} ---")
-        instance_result = process_sonarr_instance(instance, plex_server, config_settings, dry_run)
-        master_ids['tmdb_ids'].extend(instance_result['tmdb_ids'])
-        master_ids['tvdb_ids'].extend(instance_result['tvdb_ids'])
+        res = process_sonarr_instance(instance, plex_server, config_settings, dry_run)
+        for b in ('dated', 'undated'):
+            master[b]['tmdb_ids'].extend(res[b]['tmdb_ids'])
+            master[b]['tvdb_ids'].extend(res[b]['tvdb_ids'])
         logging.info(f"--- Instance {instance.get('name')} finished ---")
-
-    # 6. Deduplicate
-    unique_tmdb_ids = sorted(list(set(master_ids['tmdb_ids'])))
-    unique_tvdb_ids = sorted(list(set(master_ids['tvdb_ids'])))
-    logging.info(f"Total Unique TMDb IDs: {len(unique_tmdb_ids)}")
-    logging.info(f"Total Unique TVDb IDs: {len(unique_tvdb_ids)}")
+    def dedup(ids): return sorted(list(set(ids)))
+    dated_tmdb   = dedup(master['dated']['tmdb_ids'])
+    dated_tvdb   = dedup(master['dated']['tvdb_ids'])
+    undated_tmdb = dedup(master['undated']['tmdb_ids'])
+    undated_tvdb = dedup(master['undated']['tvdb_ids'])
+    logging.info(f"Dated: {len(dated_tmdb)+len(dated_tvdb)}, Undated: {len(undated_tmdb)+len(undated_tvdb)}")
 
     # 7. Generate YAML
     if generate_overlay:
         if not overlay_output_path:
-            logging.error("Overlay generation enabled, but 'returning_path' is missing in 'output:' config.")
+            logging.error("returning_path missing")
         else:
-            yaml_key = "returning_series"
-            
-            # Build the overlay content
-            overlay_content = {
-                "overlay": { "name": "Returning Series" } # Default name
-            }
-
-            if not unique_tmdb_ids and not unique_tvdb_ids:
-                logging.info("No empty returning series found. Clearing overlay.")
-                # Still create the file, but with empty lists
-                overlay_content["tmdb_show"] = []
-                overlay_content["tvdb_show"] = []
-            else:
-                logging.info(f"Generating Overlay for {len(unique_tmdb_ids)} TMDb shows and {len(unique_tvdb_ids)} TVDb shows...")
-                
-                final_overlay_style = merge_styles(global_defaults, overlay_override)
-                final_overlay_style = validate_font(final_overlay_style)
-
-                overlay_text = final_overlay_style.pop('text', 'RETURNING')
-                overlay_name = f"text({overlay_text})"
-                
-                # Update overlay with the final calculated name and style
-                overlay_content["overlay"]["name"] = overlay_name
-                overlay_content["overlay"].update(final_overlay_style)
-
-                overlay_content["tmdb_show"] = unique_tmdb_ids
-                overlay_content["tvdb_show"] = unique_tvdb_ids
-            
-            kometa_data = {"overlays": {yaml_key: overlay_content}}
-
+            tba_text=returning_cfg.get("tba_text","TBA")
+            fs=validate_font(merge_styles(global_defaults,overlay_override))
+            ov_text=fs.get("text","NO EPISODES YET")
+            def mk(text,tm,tv):
+                s=dict(fs);s.pop("text",None)
+                o={"overlay":{"name":f"text({text})"}}
+                o["overlay"].update(s);o["tmdb_show"]=tm;o["tvdb_show"]=tv
+                return o
+            kd={"overlays":{"returning_series":mk(ov_text,dated_tmdb,dated_tvdb)}}
+            kd["overlays"]["returning_series_tba"]=mk(tba_text,undated_tmdb,undated_tvdb)
             try:
-                os.makedirs(os.path.dirname(overlay_output_path), exist_ok=True)
-                with open(overlay_output_path, 'w', encoding='utf-8') as f:
-                    yaml.dump(kometa_data, f, sort_keys=False, indent=2, allow_unicode=True)
-                logging.info(f"Successfully wrote config to: {overlay_output_path}")
+                os.makedirs(os.path.dirname(overlay_output_path),exist_ok=True)
+                with open(overlay_output_path,"w",encoding="utf-8") as f:
+                    yaml.dump(kd,f,sort_keys=False,indent=2,allow_unicode=True)
+                logging.info(f"Wrote overlay YAML to {overlay_output_path}")
             except Exception as e:
                 logging.error(f"Failed to write YAML: {e}")
 
-    # 8. Generate returning date overlays (RETURNS APR 20 etc.)
     if generate_date_overlay:
         generate_returning_date_overlays(sonarr_instances, date_overlay_cfg, dry_run)
 
