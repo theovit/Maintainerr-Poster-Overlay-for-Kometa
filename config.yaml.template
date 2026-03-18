@@ -205,6 +205,11 @@ returning:
   # The suffix to append to the dummy files
   stub_suffix: " - kometa-overlay-lock.mp4"
 
+  # When a show's first real episode is detected, set the entire series and all
+  # episodes to monitored in Sonarr. Useful when Maintainerr unmonitors shows
+  # on removal — this re-enables them so you can rewatch from the beginning.
+  remonitor_on_first_episode: true
+
   libraries:
     - "TV Shows"
     - "Anime"

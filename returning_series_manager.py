@@ -171,6 +171,54 @@ def find_plex_show(plex, tmdb_id=None, tvdb_id=None, title=None):
 
     return None
 
+def remonitor_sonarr_series(instance_name, base_url, api_key, show, dry_run=False):
+    """Sets a series and all its episodes to monitored in Sonarr."""
+    title = show.get('title', 'Unknown')
+    series_id = show.get('id')
+
+    if not series_id:
+        logging.warning(f"  > [{instance_name}] Cannot re-monitor '{title}': missing Sonarr series ID.")
+        return
+
+    if dry_run:
+        logging.info(f"  [DRY RUN] Would re-monitor all episodes for '{title}' in Sonarr.")
+        return
+
+    headers = {**get_sonarr_headers(api_key), "Content-Type": "application/json"}
+    api_base = f"{base_url.rstrip('/')}/api/v3"
+
+    # 1. Set series itself to monitored
+    try:
+        series_data = dict(show)
+        series_data['monitored'] = True
+        resp = requests.put(f"{api_base}/series/{series_id}", json=series_data, headers=headers)
+        resp.raise_for_status()
+        logging.info(f"  > [{instance_name}] Series '{title}' set to monitored.")
+    except Exception as e:
+        logging.error(f"  > [{instance_name}] Failed to re-monitor series '{title}': {e}")
+        return
+
+    # 2. Get all episode IDs
+    try:
+        resp = requests.get(f"{api_base}/episode", params={"seriesId": series_id}, headers=headers)
+        resp.raise_for_status()
+        episode_ids = [ep['id'] for ep in resp.json()]
+    except Exception as e:
+        logging.error(f"  > [{instance_name}] Failed to fetch episodes for '{title}': {e}")
+        return
+
+    # 3. Monitor all episodes
+    if episode_ids:
+        try:
+            resp = requests.put(f"{api_base}/episode/monitor",
+                                json={"episodeIds": episode_ids, "monitored": True},
+                                headers=headers)
+            resp.raise_for_status()
+            logging.info(f"  > [{instance_name}] Monitored {len(episode_ids)} episodes for '{title}'.")
+        except Exception as e:
+            logging.error(f"  > [{instance_name}] Failed to monitor episodes for '{title}': {e}")
+
+
 def cleanup_real_media(plex, show_path, stub_suffix, tmdb_id=None, tvdb_id=None, title=None, dry_run=False):
     """Deletes stub files and removes Plex labels for shows with real media."""
     if dry_run:
@@ -341,6 +389,7 @@ def process_sonarr_instance(instance, plex_server, config_settings, dry_run=Fals
 
     template_file = config_settings['template_file']
     stub_suffix = config_settings['stub_suffix']
+    remonitor_on_first_episode = config_settings.get('remonitor_on_first_episode', True)
 
     series_list = get_sonarr_series(name, url, api_key)
     instance_ids = {'tmdb_ids': [], 'tvdb_ids': []}
@@ -372,8 +421,10 @@ def process_sonarr_instance(instance, plex_server, config_settings, dry_run=Fals
         logging.debug(f"  > Path mapping: '{sonarr_path}' -> '{local_show_path}'")
 
         if has_files:
-            # This show has files, so it's a candidate for cleanup
+            # This show has files — clean up stub/label and optionally re-monitor all episodes
             cleanup_real_media(plex_server, local_show_path, stub_suffix, tmdb_id, tvdb_id, title, dry_run)
+            if remonitor_on_first_episode:
+                remonitor_sonarr_series(name, url, api_key, show, dry_run)
         else:
             # This show has NO files, so it's a candidate for the overlay
             if not tmdb_id and not tvdb_id:
