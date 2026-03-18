@@ -4,7 +4,9 @@
 # 1. CONFIGURATION PARSER
 # =======================================================
 CONFIG_FILE="config.yaml"
-BASE_DIR=$(dirname "$(realpath "$0")")
+# Use the path as-given without resolving symlinks.
+# realpath would follow /home -> /home32 but Arr containers only mount /home.
+BASE_DIR=$(cd "$(dirname "$0")" && pwd)
 
 # Config cache — used as fallback when python3/PyYAML unavailable (e.g. Arr Docker containers)
 CONFIG_CACHE="$BASE_DIR/tmp/trigger_config.cache"
