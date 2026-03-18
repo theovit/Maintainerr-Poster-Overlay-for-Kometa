@@ -354,7 +354,7 @@ fi
 
 # Launch Background Worker
 export KOMETA_WORKER_MODE="true"
-nohup "$0" >> "$LOG_FILE" 2>&1 &
+nohup "$BASE_DIR/trigger.sh" >> "$LOG_FILE" 2>&1 &
 WORKER_PID=$!
 
 # When called from an *arr, exit immediately so the arr doesn't time out waiting.
