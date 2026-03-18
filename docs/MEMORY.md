@@ -33,5 +33,26 @@ Font paths in the generated YAML are passed through to Kometa as-is. Kometa reso
 ## Sonarr episodeFileCount is the reliable "has files" check
 The script uses `statistics.episodeFileCount > 0` from Sonarr's series response rather than walking the filesystem, for efficiency. The filesystem walk (`has_real_media()`) exists as a utility function but is not called in the main loop.
 
+## Kometa is forked — poster_upload_delay patch must survive updates
+Kometa's `modules/library.py` and `modules/config.py` have been manually patched to add a `poster_upload_delay` setting. This throttles poster uploads to Plex to prevent connection pool exhaustion crashing the web UI. When Kometa updates, re-apply these changes:
+
+**`modules/config.py`** — add in two places, alongside `item_refresh_delay`:
+```python
+# ~line 493 (general settings)
+"poster_upload_delay": check_for_attribute(self.data, "poster_upload_delay", parent="settings", var_type="int", default=0),
+# ~line 914 (per-library params)
+params["poster_upload_delay"] = check_for_attribute(lib, "poster_upload_delay", parent="settings", var_type="int", default=self.general["poster_upload_delay"], do_print=False, save=False)
+```
+
+**`modules/library.py`** — add `self.poster_upload_delay = params["poster_upload_delay"]` in `__init__`, then add after each `_upload_image` call in `upload_images`:
+```python
+if self.poster_upload_delay > 0: time.sleep(self.poster_upload_delay)
+```
+
+Set `poster_upload_delay: 2` (seconds) in Kometa's `config.yml` under `settings:`.
+
+## Kometa optimize: false
+`optimize: true` in Kometa's Plex config runs a DB optimization after every run — heavy enough to crash the Plex web UI. Kept as `false`. Don't re-enable it.
+
 ## Two Sonarr and two Radarr instances
 TV Shows and Anime each have their own Sonarr instance. Movies and Anime Movies each have their own Radarr instance. The overlay scripts currently only integrate with Sonarr. Radarr instances are defined in `config.yaml` under `radarr_instances` but nothing reads that key yet.
