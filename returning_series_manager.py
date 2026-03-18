@@ -491,9 +491,15 @@ def generate_returning_date_overlays(sonarr_instances, date_overlay_cfg, dry_run
         for show in get_sonarr_series(name, url, api_key):
             if show.get('status', '').lower() not in ['continuing', 'upcoming']:
                 continue
+            # Skip shows with no episodes — they already get "NO EPISODES YET" / "NOT RELEASED"
+            # overlays from returning_overlays.yaml. Date overlays are only for shows that
+            # have existing episodes and are returning for a new season.
+            if show.get('statistics', {}).get('episodeFileCount', 0) == 0:
+                continue
+
             next_airing = show.get('nextAiring')
             if not next_airing:
-                continue  # No known date — TSSK handles with generic "RETURNING" / our "NO EPISODES YET"
+                continue  # No known date — TSSK handles with generic "RETURNING"
 
             date_label = format_air_date(next_airing, date_format)
             if not date_label:
@@ -628,7 +634,7 @@ def main():
         if not overlay_output_path:
             logging.error("returning_path missing")
         else:
-            tba_text=returning_cfg.get("tba_text","TBA")
+            tba_text=returning_cfg.get("tba_text","NOT RELEASED")
             fs=validate_font(merge_styles(global_defaults,overlay_override))
             ov_text=fs.get("text","NO EPISODES YET")
             def mk(text,tm,tv):

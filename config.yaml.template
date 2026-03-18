@@ -198,7 +198,7 @@ execution:
 returning:
   # NEW: Toggle to enable/disable the YAML generator script
   generate_overlay: true
-  tba_text: "TBA"  # Overlay text for shows with 0 episodes and no release date announced
+  tba_text: "NOT RELEASED"  # Overlay text for shows with 0 episodes and no release date announced
   # Path to a blank video file template (optional)
   # If this file is missing, the script will try to use FFMPEG to generate a black screen.
   template_file: "/path/to/kometa/config/assets/blank.mp4"
