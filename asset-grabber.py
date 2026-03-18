@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import json
 import requests
 import yaml
 import logging
@@ -161,6 +162,22 @@ class KometaAssetGrabber:
         except Exception as e:
             self.logger.error(f"Failed to download: {e}")
 
+    def load_season_cache(self, cache_path):
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'r') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def save_season_cache(self, cache_path, cache):
+        try:
+            with open(cache_path, 'w') as f:
+                json.dump(cache, f)
+        except Exception as e:
+            self.logger.warning(f"Could not save season cache: {e}")
+
     def run(self):
         # 1. Check if Enabled
         if not self.config.get('assets', {}).get('enabled', True):
@@ -177,6 +194,8 @@ class KometaAssetGrabber:
         plex_token = plex_cfg.get('token') or connect.get('plex_token')
         asset_dir = os.path.expanduser(self.config['assets']['path'])
         libraries = self.config['assets'].get('libraries', [])
+        cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'asset_season_cache.json')
+        season_cache = self.load_season_cache(cache_path)
 
         self.logger.info(f"Connecting to Plex at {plex_url}...")
         
@@ -222,21 +241,43 @@ class KometaAssetGrabber:
                         if poster_url:
                             self.download_image(poster_url, poster_path, plex_url, plex_token)
 
-                    # 4. Handle Seasons (skip API call per season if already on disk)
+                    # 4. Handle Seasons (cache-aware: skip API call if count unchanged and all posters exist)
                     if item.type == 'show':
-                        for season in item.seasons():
-                            season_idx = int(season.index)
-                            filename = "Season00.jpg" if season_idx == 0 else f"Season{season_idx:02d}.jpg"
-                            season_path = os.path.join(target_dir, filename)
-                            season_base = os.path.splitext(season_path)[0]
-                            if not os.path.exists(season_base + ".jpg") and not os.path.exists(season_base + ".webp"):
-                                s_poster = self.get_best_poster(season)
-                                if s_poster:
-                                    self.download_image(s_poster, season_path, plex_url, plex_token)
-                                
+                        key = str(item.ratingKey)
+                        current_count = item.childCount
+                        cached = season_cache.get(key, {})
+                        cached_indices = cached.get('indices', [])
+                        cached_count = cached.get('count', -1)
+
+                        # Check if all cached season posters exist on disk
+                        def all_posters_exist(indices):
+                            for idx in indices:
+                                base = os.path.join(target_dir, "Season00" if idx == 0 else f"Season{idx:02d}")
+                                if not os.path.exists(base + ".jpg") and not os.path.exists(base + ".webp"):
+                                    return False
+                            return True
+
+                        if cached_count == current_count and cached_indices and all_posters_exist(cached_indices):
+                            self.logger.debug(f"Season cache hit (all {current_count} seasons present): {item.title}")
+                        else:
+                            # Fetch seasons from Plex, download any missing posters, update cache
+                            season_indices = []
+                            for season in item.seasons():
+                                season_idx = int(season.index)
+                                season_indices.append(season_idx)
+                                filename = "Season00.jpg" if season_idx == 0 else f"Season{season_idx:02d}.jpg"
+                                season_path = os.path.join(target_dir, filename)
+                                season_base = os.path.splitext(season_path)[0]
+                                if not os.path.exists(season_base + ".jpg") and not os.path.exists(season_base + ".webp"):
+                                    s_poster = self.get_best_poster(season)
+                                    if s_poster:
+                                        self.download_image(s_poster, season_path, plex_url, plex_token)
+                            season_cache[key] = {'count': current_count, 'indices': season_indices}
+
             except Exception as e:
                 self.logger.error(f"Could not process library {lib_name}: {e}")
 
+        self.save_season_cache(cache_path, season_cache)
         self.logger.info("Asset Grabber Complete.")
 
 if __name__ == "__main__":

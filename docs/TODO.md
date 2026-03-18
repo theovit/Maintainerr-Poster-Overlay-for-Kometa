@@ -3,7 +3,6 @@
 ## High
 
 ## Medium
-- [ ] `asset-grabber.py` still calls `item.seasons()` for every TV show on every run to discover season list — cache season counts/indices locally (e.g. a small JSON file) so fully-seeded shows make zero Plex API calls; important on shared box where minimizing requests is a priority
 - [ ] `asset-grabber.py` hard-imports `plexapi` (no try/except) — crashes the whole pipeline if PlexAPI isn't installed; should match the graceful pattern in `returning_series_manager.py`
 - [ ] `install.sh` config wizard builds raw JSON via shell string interpolation — passwords with `"`, `$`, or `\` will silently corrupt the config write
 - [ ] Radarr instances (Movies + Anime Movies) are running but not integrated — `returning_series_manager.py` is Sonarr-only; no "returning" stubs for movies
