@@ -332,9 +332,8 @@ def process_sonarr_instance(instance, plex_server, config_settings):
 
     for show in series_list:
         status = show.get('status', '').lower()
-        monitored = show.get('monitored', False)
 
-        if not monitored or status not in ['continuing', 'upcoming']:
+        if status not in ['continuing', 'upcoming']:
             continue
             
         title = show.get('title')
