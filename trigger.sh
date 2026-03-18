@@ -6,19 +6,30 @@
 CONFIG_FILE="config.yaml"
 BASE_DIR=$(dirname "$(realpath "$0")")
 
-# Resolve python3 with fallback for stripped PATH environments (Sonarr/Radarr custom scripts)
+# Config cache — used as fallback when python3/PyYAML unavailable (e.g. Arr Docker containers)
+CONFIG_CACHE="$BASE_DIR/tmp/trigger_config.cache"
+
+# Resolve python3 — probe known locations for stripped PATH environments (Sonarr/Radarr Docker)
 PYTHON3_BIN=$(command -v python3 2>/dev/null)
 if [ -z "$PYTHON3_BIN" ]; then
-    for _p in /usr/bin/python3 /usr/local/bin/python3 "$HOME/.pyenv/shims/python3" /usr/bin/python3.9; do
-        if [ -x "$_p" ]; then PYTHON3_BIN="$_p"; break; fi
+    for _p in \
+        /lsiopy/bin/python3 \
+        /usr/bin/python3 \
+        /usr/local/bin/python3 \
+        /home/northmainave/.pyenv/shims/python3 \
+        /home/northmainave/.pyenv/versions/3.*/bin/python3 \
+        /usr/bin/python3.9 \
+        /usr/bin/python; do
+        for _ep in $_p; do
+            if [ -x "$_ep" ]; then PYTHON3_BIN="$_ep"; break 2; fi
+        done
     done
 fi
-if [ -z "$PYTHON3_BIN" ]; then
-    echo "[ERROR] python3 not found. Cannot parse config. Add python3 to PATH or set python_cmd." >&2
-    exit 1
-fi
 
-eval $("$PYTHON3_BIN" -c "
+# Try parsing config.yaml with python3
+_CONFIG_VARS=""
+if [ -n "$PYTHON3_BIN" ]; then
+    _CONFIG_VARS=$("$PYTHON3_BIN" -c "
 import yaml, os, sys
 
 def get_abs_path(base, path):
@@ -36,33 +47,30 @@ try:
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
         exec_conf = config.get('execution', {})
-        
-        # --- EXPORT BASIC VARS ---
+
         def set_var(name, val): print(f'{name}=\"{val}\"')
 
         set_var('WAIT_TIME', exec_conf.get('wait_time', 300))
-        
+
         py_cmd = exec_conf.get('python_cmd', 'python3')
         if ' -u' not in py_cmd: py_cmd += ' -u'
         set_var('PYTHON_CMD', py_cmd)
-        
+
         set_var('LOCK_FILE', get_abs_path('$BASE_DIR', exec_conf.get('lock_file', '/tmp/kometa_sync.lock')))
         set_var('TIMER_FILE', get_abs_path('$BASE_DIR', exec_conf.get('timer_file', '/tmp/kometa_sync.timer')))
         set_var('LOG_FILE', get_abs_path('$BASE_DIR', exec_conf.get('log_file', '/tmp/kometa_sync_wrapper.log')))
-        
-        set_var('ASSET_SCRIPT', get_abs_path('$BASE_DIR', exec_conf.get('asset_grabber_path', 'kometa_asset_grabber.py')))
+
+        set_var('ASSET_SCRIPT', get_abs_path('$BASE_DIR', exec_conf.get('asset_grabber_path', 'asset-grabber.py')))
         set_var('OVERLAY_SCRIPT', get_abs_path('$BASE_DIR', exec_conf.get('overlay_generator_path', 'kometa_maintainerr_overlay_yaml.py')))
         set_var('RETURNING_SCRIPT', get_abs_path('$BASE_DIR', 'returning_series_manager.py'))
 
         k_path = exec_conf.get('kometa_path', 'kometa.py')
         if os.path.exists(os.path.join('$BASE_DIR', k_path)):
-             set_var('KOMETA_SCRIPT', os.path.join('$BASE_DIR', k_path))
+            set_var('KOMETA_SCRIPT', os.path.join('$BASE_DIR', k_path))
         else:
-             set_var('KOMETA_SCRIPT', k_path)
+            set_var('KOMETA_SCRIPT', k_path)
         set_var('KOMETA_ARGS', exec_conf.get('kometa_args', '--run'))
 
-        # --- FIX: PARSE SCRIPTS CORRECTLY ---
-        # 1. Look in root 'scripts' (where your config has them) OR 'tssk.scripts'
         script_list = config.get('scripts', [])
         if not script_list:
             script_list = config.get('tssk', {}).get('scripts', [])
@@ -71,9 +79,7 @@ try:
         names = []
         args = []
 
-        # 2. Handle the list of objects
         for s in script_list:
-            # If entry is a dict {name: ..., path: ...}
             if isinstance(s, dict):
                 if not s.get('enabled', True): continue
                 p = get_abs_path('$BASE_DIR', s.get('path', ''))
@@ -81,7 +87,6 @@ try:
                     paths.append(p)
                     names.append(s.get('name', os.path.basename(p)))
                     args.append(s.get('args', ''))
-            # If entry is just a string path
             elif isinstance(s, str):
                 p = get_abs_path('$BASE_DIR', s)
                 if p:
@@ -100,7 +105,23 @@ try:
 except Exception as e:
     sys.stderr.write(f\"Error parsing config.yaml: {e}\\n\")
     sys.exit(1)
-")
+" 2>/dev/null)
+fi
+
+if [ -n "$_CONFIG_VARS" ]; then
+    # Parse succeeded — apply vars and save cache for future container invocations
+    eval "$_CONFIG_VARS"
+    mkdir -p "$(dirname "$CONFIG_CACHE")"
+    echo "$_CONFIG_VARS" > "$CONFIG_CACHE"
+elif [ -f "$CONFIG_CACHE" ]; then
+    # python3 or PyYAML unavailable (e.g. Arr Docker container) — use cached config
+    echo "[INFO] python3/PyYAML unavailable. Using cached config." >&2
+    source "$CONFIG_CACHE"
+else
+    echo "[ERROR] Cannot parse config.yaml (python3/PyYAML missing) and no cache exists." >&2
+    echo "[FIX]  Run ./trigger.sh once from your normal shell to generate the cache, then retry." >&2
+    exit 1
+fi
 
 # =======================================================
 # 2. SYSTEM PREP
