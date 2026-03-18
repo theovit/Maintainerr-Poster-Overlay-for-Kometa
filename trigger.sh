@@ -6,7 +6,19 @@
 CONFIG_FILE="config.yaml"
 BASE_DIR=$(dirname "$(realpath "$0")")
 
-eval $(python3 -c "
+# Resolve python3 with fallback for stripped PATH environments (Sonarr/Radarr custom scripts)
+PYTHON3_BIN=$(command -v python3 2>/dev/null)
+if [ -z "$PYTHON3_BIN" ]; then
+    for _p in /usr/bin/python3 /usr/local/bin/python3 "$HOME/.pyenv/shims/python3" /usr/bin/python3.9; do
+        if [ -x "$_p" ]; then PYTHON3_BIN="$_p"; break; fi
+    done
+fi
+if [ -z "$PYTHON3_BIN" ]; then
+    echo "[ERROR] python3 not found. Cannot parse config. Add python3 to PATH or set python_cmd." >&2
+    exit 1
+fi
+
+eval $("$PYTHON3_BIN" -c "
 import yaml, os, sys
 
 def get_abs_path(base, path):
