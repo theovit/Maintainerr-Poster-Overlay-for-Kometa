@@ -268,6 +268,9 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
     if [ -n "$KOMETA_BG_PID" ] && [ -d "$KOMETA_DIR" ]; then
         echo "[$(date '+%H:%M:%S')] Restarting background Kometa..." >> "$LOG_FILE"
         cd "$KOMETA_DIR"
+        # Close the lock fd before spawning background Kometa — otherwise the child
+        # inherits fd 200 and holds the flock forever, blocking all future workers.
+        exec 200>&-
         nohup $PYTHON_CMD "$(basename "$KOMETA_SCRIPT")" --log-requests >> "$KOMETA_DIR/kometa.log" 2>&1 &
         echo "[$(date '+%H:%M:%S')] Background Kometa restarted (PID: $!)" >> "$LOG_FILE"
     fi
