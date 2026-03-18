@@ -6,7 +6,11 @@ import requests
 import yaml
 import logging
 import sys
-from plexapi.server import PlexServer
+try:
+    from plexapi.server import PlexServer
+except ImportError:
+    print("ERROR: PlexAPI is not installed. Run: pip install PlexAPI")
+    sys.exit(1)
 
 class KometaAssetGrabber:
     def __init__(self, config_path="config.yaml"):

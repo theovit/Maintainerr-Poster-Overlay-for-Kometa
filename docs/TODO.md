@@ -3,7 +3,6 @@
 ## High
 
 ## Medium
-- [ ] `asset-grabber.py` hard-imports `plexapi` (no try/except) — crashes the whole pipeline if PlexAPI isn't installed; should match the graceful pattern in `returning_series_manager.py`
 - [ ] `install.sh` config wizard builds raw JSON via shell string interpolation — passwords with `"`, `$`, or `\` will silently corrupt the config write
 - [ ] Radarr instances (Movies + Anime Movies) are running but not integrated — `returning_series_manager.py` is Sonarr-only; no "returning" stubs for movies
 - [ ] Add `--dry-run` flag to `returning_series_manager.py` to preview stub create/delete actions without making changes
