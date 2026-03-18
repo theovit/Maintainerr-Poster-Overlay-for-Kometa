@@ -50,9 +50,12 @@ class KometaAssetGrabber:
     def validate_config(self):
         connect = self.config.get('connect', {})
         assets = self.config.get('assets', {})
-        
-        if not connect.get('plex_url') or not connect.get('plex_token'):
-            self.logger.critical("Missing 'plex_url' or 'plex_token' in config.yaml")
+        plex_cfg = connect.get('plex', {})
+        plex_url = plex_cfg.get('url') or connect.get('plex_url')
+        plex_token = plex_cfg.get('token') or connect.get('plex_token')
+
+        if not plex_url or not plex_token:
+            self.logger.critical("Missing Plex URL or token in config.yaml (connect.plex.url / connect.plex.token)")
             return False
 
         if not assets.get('path'):
@@ -168,8 +171,10 @@ class KometaAssetGrabber:
         if not self.validate_config():
             sys.exit(1)
 
-        plex_url = self.config['connect']['plex_url']
-        plex_token = self.config['connect']['plex_token']
+        connect = self.config['connect']
+        plex_cfg = connect.get('plex', {})
+        plex_url = plex_cfg.get('url') or connect.get('plex_url')
+        plex_token = plex_cfg.get('token') or connect.get('plex_token')
         asset_dir = os.path.expanduser(self.config['assets']['path'])
         libraries = self.config['assets'].get('libraries', [])
 

@@ -5,8 +5,8 @@ connect:
     maintainerr_user: "admin"
     maintainerr_pass: "your#secure#password"
   plex:
-    plex_url: "http://192.168.1.100:32400"
-    plex_token: "YOUR_PLEX_TOKEN"
+    url: "http://192.168.1.100:32400"
+    token: "YOUR_PLEX_TOKEN"
   sonarr_instances:
     - name: "Sonarr - Anime"
       url: "http://192.168.1.50:8989"
@@ -148,17 +148,21 @@ assets:
   grab_originals: true
 
 # =======================================================
-#  TSSK SETTINGS (TV-show-status-for-Kometa)
-#  https://github.com/netplexflix/TV-show-status-for-Kometa
+#  EXTERNAL SCRIPTS
 #  Run after Asset Grabber, but before Kometa.
+#  Supports TSSK and any other Python or shell scripts.
 # =======================================================
-tssk:
-  enabled: true
 
-# List all TSSK scripts you want to run here or other sciprts
+# NOTE: 'tssk.enabled' is deprecated and no longer read.
+# Use the 'scripts' list below to control what runs.
+
 scripts:
-  - "path/to/tssk_sonarr_1.py"
-  - "path/to/tssk_sonarr_2.py"
+  - name: "TSSK TV Shows"
+    path: "path/to/TSSK/TSSK.py"
+    enabled: true
+  - name: "TSSK Anime"
+    path: "path/to/TSSK_Anime/TSSK.py"
+    enabled: true
 
 # =======================================================
 #  EXECUTION / WRAPPER SETTINGS
@@ -199,7 +203,7 @@ returning:
   template_file: "/path/to/kometa/config/assets/blank.mp4"
 
   # The suffix to append to the dummy files
-  stub_suffix: "- kometa-overlay-lock.mp4"
+  stub_suffix: " - kometa-overlay-lock.mp4"
 
   libraries:
     - "TV Shows"

@@ -58,7 +58,7 @@ fi
 # 4. Install Requirements
 echo -e "${BLUE}Installing dependencies...${NC}"
 ./venv/bin/pip install --upgrade pip > /dev/null
-./venv/bin/pip install -r requirements.txt > /dev/null || { echo -e "${RED}Pip install failed.${NC}"; exit 1; }
+./venv/bin/pip install requests PyYAML PlexAPI > /dev/null || { echo -e "${RED}Pip install failed.${NC}"; exit 1; }
 echo -e "${GREEN}Dependencies installed.${NC}"
 
 # 5. Config Setup
@@ -140,10 +140,10 @@ echo -e "  Creates dummy files for upcoming shows so they appear in Plex."
 read -r -p "  Enable Returning Series Manager? (y/n) [y]: " IN_RET
 if [[ "$IN_RET" =~ ^[Nn]$ ]]; then RET_BOOL="false"; else RET_BOOL="true"; fi
 
-# TSSK
-echo -e "\n${YELLOW}> TSSK (Task Scripts)${NC}"
-echo -e "  Run external Python scripts as part of this pipeline."
-read -r -p "  Enable TSSK? (y/n) [n]: " IN_TSSK
+# External Scripts
+echo -e "\n${YELLOW}> External Scripts${NC}"
+echo -e "  Run external scripts (e.g. TSSK) as part of this pipeline."
+read -r -p "  Configure external scripts? (y/n) [n]: " IN_TSSK
 if [[ "$IN_TSSK" =~ ^[Yy]$ ]]; then TSSK_BOOL="true"; else TSSK_BOOL="false"; fi
 
 # Limit
@@ -194,24 +194,24 @@ if [ "$RET_BOOL" == "true" ]; then
     read -r -p "  Blank Template  [$DEF_TEMP]: " RET_TEMP; RET_TEMP=${RET_TEMP:-$DEF_TEMP}
 fi
 
-# 5. TSSK Scripts (Conditional Loop)
-TSSK_LIST="[]"
+# 5. External Scripts (Conditional Loop)
+SCRIPTS_LIST="[]"
 if [ "$TSSK_BOOL" == "true" ]; then
-    echo -e "${CYAN}TSSK Scripts:${NC}"
-    echo -e "  Add full paths to python scripts you want to run."
-    TSSK_LIST="["
+    echo -e "${CYAN}External Scripts:${NC}"
+    echo -e "  Add scripts to run after asset grabber, before Kometa."
+    SCRIPTS_LIST="["
     while true; do
-        read -r -p "  Add a Script Path? (y/n) [y]: " ADD_SCRIPT
+        read -r -p "  Add a script? (y/n) [y]: " ADD_SCRIPT
         if [[ "$ADD_SCRIPT" =~ ^[Nn]$ ]]; then break; fi
-        
+        read -r -p "    Name (e.g. 'TSSK TV'): " SCRIPT_NAME
         read -r -p "    Path: " SCRIPT_PATH
-        TSSK_LIST+="\"$SCRIPT_PATH\","
+        SCRIPTS_LIST+="{\"name\": \"$SCRIPT_NAME\", \"path\": \"$SCRIPT_PATH\", \"enabled\": true},"
     done
-    TSSK_LIST="${TSSK_LIST%,}]"
+    SCRIPTS_LIST="${SCRIPTS_LIST%,}]"
 fi
 
 JSON_PAYLOAD+="\"paths\": {\"movies\": \"$OUT_MOV\", \"shows\": \"$OUT_TV\", \"returning\": \"$OUT_RET\", \"assets\": \"$OUT_AST\", \"ret_template\": \"$RET_TEMP\"},"
-JSON_PAYLOAD+="\"tssk_scripts\": $TSSK_LIST,"
+JSON_PAYLOAD+="\"scripts\": $SCRIPTS_LIST,"
 
 
 # ----------------------------------------
@@ -222,7 +222,7 @@ read -r -p "Wait Time (seconds) before running [$300]: " EXEC_WAIT; EXEC_WAIT=${
 read -r -p "Critical Days (Red) [3]: " TRIG_CRIT; TRIG_CRIT=${TRIG_CRIT:-3}
 read -r -p "Warning Days (Orange) [7]: " TRIG_WARN; TRIG_WARN=${TRIG_WARN:-7}
 
-JSON_PAYLOAD+="\"behavior\": {\"wait\": $EXEC_WAIT, \"crit\": $TRIG_CRIT, \"warn\": $TRIG_WARN, \"assets_enabled\": $ASSET_BOOL, \"returning_enabled\": $RET_BOOL, \"tssk_enabled\": $TSSK_BOOL, \"use_limit\": $LIMIT_BOOL}}"
+JSON_PAYLOAD+="\"behavior\": {\"wait\": $EXEC_WAIT, \"crit\": $TRIG_CRIT, \"warn\": $TRIG_WARN, \"assets_enabled\": $ASSET_BOOL, \"returning_enabled\": $RET_BOOL, \"use_limit\": $LIMIT_BOOL}}"
 
 # --- PYTHON WRITER ---
 echo -e "\n${BLUE}Saving configuration...${NC}"
@@ -247,8 +247,8 @@ c['maintainerr'].update({
     'maintainerr_user': data['maintainerr']['user']
 })
 if data['maintainerr']['pass']: c['maintainerr']['maintainerr_pass'] = data['maintainerr']['pass']
-c['plex']['plex_url'] = data['plex']['url']
-if data['plex']['token']: c['plex']['plex_token'] = data['plex']['token']
+c['plex']['url'] = data['plex']['url']
+if data['plex']['token']: c['plex']['token'] = data['plex']['token']
 if data['sonarr']: c['sonarr_instances'] = data['sonarr']
 if data['radarr']: c['radarr_instances'] = data['radarr']
 config['connect'] = c
@@ -272,13 +272,11 @@ config['returning']['generate_overlay'] = data['behavior']['returning_enabled']
 if data['paths']['ret_template']:
     config['returning']['template_file'] = data['paths']['ret_template']
 
-# 5. TSSK
-config['tssk'] = config.get('tssk', {})
-config['tssk']['enabled'] = data['behavior']['tssk_enabled']
-if data['tssk_scripts']:
-    config['tssk']['scripts'] = data['tssk_scripts']
-elif 'scripts' not in config['tssk']:
-    config['tssk']['scripts'] = []
+# 5. External Scripts
+if data['scripts']:
+    config['scripts'] = data['scripts']
+elif 'scripts' not in config:
+    config['scripts'] = []
 
 # 6. Behavior
 config['execution'] = config.get('execution', {})

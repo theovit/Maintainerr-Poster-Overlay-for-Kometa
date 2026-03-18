@@ -113,15 +113,140 @@ def get_sonarr_series(instance_name, base_url, api_key):
         return []
 
 def has_real_media(show_path, stub_suffix):
-    """Returns True if any video file (other than stub) exists."""
+    """
+    Returns True if any video file (other than stub) exists.
+    Exits immediately upon finding the first valid file for efficiency.
+    """
     if not os.path.exists(show_path):
         return False
-    for root, dirs, files in os.walk(show_path):
+    for root, _, files in os.walk(show_path):
         for file in files:
-            if file.lower().endswith(VIDEO_EXTENSIONS):
-                if not file.endswith(stub_suffix):
-                    return True
+            # Check if the file is a video and not a stub
+            if file.lower().endswith(VIDEO_EXTENSIONS) and not file.endswith(stub_suffix):
+                logging.debug(f"  > Found real media: {os.path.join(root, file)}")
+                return True
     return False
+
+def find_plex_show(plex, tmdb_id=None, tvdb_id=None, title=None):
+    """Finds a show in Plex using GUIDs for precision, with title as fallback."""
+    if not plex:
+        return None
+
+    # --- GUID Search (Priority) ---
+    guid_map = {}
+    if tmdb_id: guid_map[f"tmdb://{tmdb_id}"] = "TMDb"
+    if tvdb_id: guid_map[f"tvdb://{tvdb_id}"] = "TVDb"
+
+    if guid_map:
+        for library in plex.library.sections():
+            if library.type == 'show':
+                for guid_str, id_type in guid_map.items():
+                    try:
+                        results = library.search(guid=guid_str)
+                        if results:
+                            logging.debug(f"  > Plex: Found '{results[0].title}' via GUID '{guid_str}'")
+                            return results[0]
+                    except Exception:
+                        # Some Plex versions might error on invalid GUID searches
+                        logging.debug(f"  > Plex: Could not perform GUID search for '{guid_str}' in '{library.title}'")
+    
+    # --- Title Search (Fallback) ---
+    if title:
+        logging.debug(f"  > Plex: GUID search failed. Falling back to title search for '{title}'")
+        try:
+            results = plex.search(title, mediatype='show')
+            # If we have IDs, try to find the best match from title results
+            if results and guid_map:
+                for show in results:
+                    show_guids = [g.id for g in show.guids]
+                    if any(g in show_guids for g in guid_map.keys()):
+                        logging.debug(f"  > Plex: Matched '{show.title}' via GUID after title search.")
+                        return show
+            elif results:
+                logging.warning(f"  > Plex: Found show '{results[0].title}' by title only. Match may not be 100% accurate.")
+                return results[0]
+        except Exception as e:
+            logging.error(f"  > Plex title search error: {e}")
+
+    return None
+
+def cleanup_real_media(plex, show_path, stub_suffix, tmdb_id=None, tvdb_id=None, title=None):
+    """Deletes stub files and removes Plex labels for shows with real media."""
+    logging.info(f"Cleanup: '{title}' has real media. Removing stub and label.")
+    
+    # 1. Delete stub file(s)
+    stubs_found = 0
+    if os.path.exists(show_path):
+        for root, _, files in os.walk(show_path):
+            for file in files:
+                if file.endswith(stub_suffix):
+                    try:
+                        stub_path = os.path.join(root, file)
+                        os.remove(stub_path)
+                        stubs_found += 1
+                        logging.info(f"  > Cleanup: Deleted stub file at '{stub_path}'")
+                    except OSError as e:
+                        logging.error(f"  > Cleanup: Failed to delete stub '{stub_path}': {e}")
+    if stubs_found == 0:
+        logging.debug("  > Cleanup: No stub files found to delete.")
+
+    # 2. Remove Plex Label
+    remove_plex_label(plex, tmdb_id, tvdb_id, title)
+
+def process_plex_label(plex, tmdb_id=None, tvdb_id=None, title=None, stub_suffix=None):
+    """Labels show in Plex and marks stub episode as watched."""
+    if not plex: return
+
+    found_show = find_plex_show(plex, tmdb_id=tmdb_id, tvdb_id=tvdb_id, title=title)
+    
+    if found_show:
+        # 1. Add Label (if missing)
+        current_labels = [l.tag for l in found_show.labels]
+        if PLEX_LABEL_NAME not in current_labels:
+            logging.info(f"  > Plex: Adding label '{PLEX_LABEL_NAME}' to '{found_show.title}'")
+            found_show.addLabel(PLEX_LABEL_NAME)
+        else:
+            logging.debug(f"  > Plex: Label already exists on '{found_show.title}'")
+
+        # 2. Mark Stub Episode as Watched
+        # Run this even if label exists, in case the stub was just scanned.
+        found_stub = False
+        for episode in found_show.episodes():
+            # Check S00 specials first, as it's most likely our stub
+            if episode.seasonNumber == 0:
+                for media in episode.media:
+                    for part in media.parts:
+                        if part.file and part.file.endswith(stub_suffix):
+                            found_stub = True
+                            if not episode.isWatched:
+                                logging.info(f"  > Plex: Marking stub episode '{episode.title}' as watched.")
+                                episode.markWatched()
+                            else:
+                                logging.debug(f"  > Plex: Stub episode '{episode.title}' already watched.")
+                            return # Exit after finding and processing stub
+        
+        if not found_stub:
+            logging.debug(f"  > Plex: Stub file for '{found_show.title}' not found in Plex yet.")
+    else:
+        id_str = f"TMDb:{tmdb_id}" if tmdb_id else f"TVDb:{tvdb_id}"
+        logging.warning(f"  > Plex: Could not find show '{title}' ({id_str}).")
+
+def remove_plex_label(plex, tmdb_id=None, tvdb_id=None, title=None):
+    """Removes the specific lock label from a show in Plex."""
+    if not plex: return
+
+    found_show = find_plex_show(plex, tmdb_id=tmdb_id, tvdb_id=tvdb_id, title=title)
+
+    if found_show:
+        current_labels = [l.tag for l in found_show.labels]
+        if PLEX_LABEL_NAME in current_labels:
+            logging.info(f"  > Cleanup: Removing Plex label for '{found_show.title}'")
+            found_show.removeLabel(PLEX_LABEL_NAME)
+        else:
+            logging.debug(f"  > Cleanup: Plex label not found on '{found_show.title}', nothing to do.")
+    else:
+        id_str = f"TMDb:{tmdb_id}" if tmdb_id else f"TVDb:{tvdb_id}"
+        logging.warning(f"  > Cleanup: Could not find Plex show '{title}' ({id_str}) to remove label.")
 
 def create_stub_file(show_path, show_title, template_file, stub_suffix):
     """Creates the dummy file if missing."""
@@ -157,52 +282,6 @@ def create_stub_file(show_path, show_title, template_file, stub_suffix):
         logging.error(f"  > Failed to create stub file: {e}")
         return False
 
-def process_plex_label(plex, tmdb_id, title, stub_suffix):
-    """Labels show in Plex and marks stub episode as watched."""
-    if not plex:
-        return
-    try:
-        results = plex.search(title, mediatype='show')
-        found_show = None
-        for item in results:
-            matches = [g.id for g in item.guids] if hasattr(item, 'guids') else []
-            matches.append(item.guid)
-            if any(f"tmdb://{tmdb_id}" in g for g in matches):
-                found_show = item
-                break
-        
-        if found_show:
-            # Label
-            current_labels = [l.tag for l in found_show.labels]
-            if PLEX_LABEL_NAME not in current_labels:
-                logging.info(f"  > Plex: Adding label '{PLEX_LABEL_NAME}' to '{found_show.title}'")
-                found_show.addLabel(PLEX_LABEL_NAME)
-
-            # Mark Stub Watched
-            found_stub = False
-            for episode in found_show.episodes():
-                is_this_stub = False
-                for media in episode.media:
-                    for part in media.parts:
-                        if part.file and part.file.endswith(stub_suffix):
-                            is_this_stub = True
-                            break
-                    if is_this_stub: break
-                
-                if is_this_stub:
-                    found_stub = True
-                    if not episode.isWatched:
-                        logging.info(f"  > Plex: Marking stub episode '{episode.title}' (S{episode.parentIndex}E{episode.index}) as watched.")
-                        episode.markWatched()
-                    break
-            
-            if not found_stub:
-                logging.debug("  > Plex: Stub file not found in Plex yet.")
-        else:
-            logging.warning(f"  > Plex: Could not find show '{title}' (TMDb: {tmdb_id}).")
-    except Exception as e:
-        logging.error(f"  > Plex Error: {e}")
-
 def merge_styles(global_defaults, specific_style):
     if not specific_style:
         return global_defaults.copy()
@@ -225,16 +304,21 @@ def validate_font(style_dict):
 
 def process_sonarr_instance(instance, plex_server, config_settings):
     """
-    Processes a single Sonarr instance. Returns list of TMDb IDs.
+    Processes a single Sonarr instance.
+    Returns a dictionary with 'tmdb_ids' and 'tvdb_ids'.
     """
     name = instance.get('name', 'Unknown')
     url = instance.get('url')
     api_key = instance.get('api_key')
-    library_path = instance.get('library_path')
+    
+    # Path mapping is now crucial for remote Sonarr/local Plex setups
+    path_mapping = instance.get('path_mapping', {})
+    sonarr_base_path = path_mapping.get('sonarr_base_path')
+    local_base_path = path_mapping.get('local_base_path')
 
-    if not url or not api_key or not library_path:
-        logging.error(f"[{name}] Skipping: Missing settings.")
-        return []
+    if not all([url, api_key, sonarr_base_path, local_base_path]):
+        logging.error(f"[{name}] Skipping: Missing url, api_key, or path_mapping settings.")
+        return {'tmdb_ids': [], 'tvdb_ids': []}
 
     ensure_sonarr_settings(name, url, api_key)
 
@@ -242,46 +326,61 @@ def process_sonarr_instance(instance, plex_server, config_settings):
     stub_suffix = config_settings['stub_suffix']
 
     series_list = get_sonarr_series(name, url, api_key)
-    instance_tmdb_ids = []
+    instance_ids = {'tmdb_ids': [], 'tvdb_ids': []}
 
     logging.info(f"[{name}] Scanning {len(series_list)} shows...")
 
     for show in series_list:
-        title = show.get('title')
-        status = show.get('status').lower()
-        monitored = show.get('monitored')
-        tmdb_id = show.get('tmdbId')
-        sonarr_path = show.get('path', '')
-
-        # --- SIMPLIFIED PATH LOGIC ---
-        # 1. Take ONLY the folder name from Sonarr
-        folder_name = os.path.basename(os.path.normpath(sonarr_path))
-        # 2. Append it to our local library path
-        show_path = os.path.join(library_path, folder_name)
+        status = show.get('status', '').lower()
+        monitored = show.get('monitored', False)
 
         if not monitored or status not in ['continuing', 'upcoming']:
             continue
+            
+        title = show.get('title')
+        tmdb_id = show.get('tmdbId')
+        tvdb_id = show.get('tvdbId')
+        sonarr_path = show.get('path', '')
+        
+        # Determine if the show has real files using Sonarr's stats
+        stats = show.get('statistics', {})
+        has_files = stats.get('episodeFileCount', 0) > 0
 
-        if not has_real_media(show_path, stub_suffix):
-            logging.info(f"[{name}] Processing: {title} (TMDb: {tmdb_id}) | Status: {status}")
+        # --- Path Mapping ---
+        if not sonarr_path.startswith(sonarr_base_path):
+            logging.warning(f"  > [{name}] Show '{title}' path '{sonarr_path}' does not match sonarr_base_path '{sonarr_base_path}'. Skipping.")
+            continue
+        
+        relative_path = os.path.relpath(sonarr_path, sonarr_base_path)
+        local_show_path = os.path.join(local_base_path, relative_path)
+        logging.debug(f"  > Path mapping: '{sonarr_path}' -> '{local_show_path}'")
+
+        if has_files:
+            # This show has files, so it's a candidate for cleanup
+            cleanup_real_media(plex_server, local_show_path, stub_suffix, tmdb_id, tvdb_id, title)
+        else:
+            # This show has NO files, so it's a candidate for the overlay
+            if not tmdb_id and not tvdb_id:
+                logging.warning(f"[{name}] Show '{title}' is missing both TMDb and TVDb IDs. Cannot process for overlay.")
+                continue
+
+            logging.info(f"[{name}] Processing: {title} (TMDb: {tmdb_id}, TVDb: {tvdb_id}) | Status: {status}")
             
-            # 1. Stub
-            create_stub_file(show_path, title, template_file, stub_suffix)
+            # 1. Create Stub File
+            create_stub_file(local_show_path, title, template_file, stub_suffix)
             
-            # 2. Plex
-            if plex_server and tmdb_id:
-                process_plex_label(plex_server, tmdb_id, title, stub_suffix)
+            # 2. Process Plex Label & Watched Status
+            if plex_server:
+                process_plex_label(plex_server, tmdb_id, tvdb_id, title, stub_suffix)
             
-            # 3. Add to List
+            # 3. Add to correct list for YAML generation
             if tmdb_id:
-                instance_tmdb_ids.append(tmdb_id)
-                # DEBUG: Force this to print
-                logging.info(f"[{name}] + ADDED ID {tmdb_id} to internal list. Count is now: {len(instance_tmdb_ids)}")
-            else:
-                logging.warning(f"[{name}] WARNING: Show '{title}' has no TMDb ID!")
+                instance_ids['tmdb_ids'].append(tmdb_id)
+            if tvdb_id:
+                instance_ids['tvdb_ids'].append(tvdb_id)
 
-    logging.info(f"[{name}] Finished. IDs collected: {len(instance_tmdb_ids)}")
-    return instance_tmdb_ids
+    logging.info(f"[{name}] Finished. TMDb IDs: {len(instance_ids['tmdb_ids'])}, TVDb IDs: {len(instance_ids['tvdb_ids'])}")
+    return instance_ids
 
 def main():
     # 1. Basic Setup (Console)
@@ -296,8 +395,8 @@ def main():
     connect_cfg = config.get('connect', {})
     
     plex_cfg = connect_cfg.get('plex', {})
-    plex_url = plex_cfg.get('url')
-    plex_token = plex_cfg.get('token')
+    plex_url = plex_cfg.get('url') or connect_cfg.get('plex_url')
+    plex_token = plex_cfg.get('token') or connect_cfg.get('plex_token')
 
     sonarr_instances = connect_cfg.get('sonarr_instances', [])
     
@@ -329,30 +428,40 @@ def main():
             logging.error(f"Failed to connect to Plex: {e}")
 
     # 5. PROCESS INSTANCES
-    master_tmdb_ids = []
+    master_ids = {'tmdb_ids': [], 'tvdb_ids': []}
 
     for instance in sonarr_instances:
         logging.info(f"--- Starting Instance: {instance.get('name')} ---")
-        ids = process_sonarr_instance(instance, plex_server, config_settings)
-        logging.info(f"--- Instance {instance.get('name')} returned {len(ids)} IDs ---")
-        master_tmdb_ids.extend(ids)
+        instance_result = process_sonarr_instance(instance, plex_server, config_settings)
+        master_ids['tmdb_ids'].extend(instance_result['tmdb_ids'])
+        master_ids['tvdb_ids'].extend(instance_result['tvdb_ids'])
+        logging.info(f"--- Instance {instance.get('name')} finished ---")
 
     # 6. Deduplicate
-    master_tmdb_ids = list(set(master_tmdb_ids))
-    logging.info(f"Total Unique Returning Series found (All Instances): {len(master_tmdb_ids)}")
+    unique_tmdb_ids = sorted(list(set(master_ids['tmdb_ids'])))
+    unique_tvdb_ids = sorted(list(set(master_ids['tvdb_ids'])))
+    logging.info(f"Total Unique TMDb IDs: {len(unique_tmdb_ids)}")
+    logging.info(f"Total Unique TVDb IDs: {len(unique_tvdb_ids)}")
 
     # 7. Generate YAML
     if generate_overlay:
         if not overlay_output_path:
             logging.error("Overlay generation enabled, but 'returning_path' is missing in 'output:' config.")
         else:
-            yaml_key = "returning_series" 
+            yaml_key = "returning_series"
             
-            if not master_tmdb_ids:
+            # Build the overlay content
+            overlay_content = {
+                "overlay": { "name": "Returning Series" } # Default name
+            }
+
+            if not unique_tmdb_ids and not unique_tvdb_ids:
                 logging.info("No empty returning series found. Clearing overlay.")
-                kometa_data = { "overlays": { yaml_key: { "overlay": { "name": "Returning Series" }, "tmdb_show": [] } } }
+                # Still create the file, but with empty lists
+                overlay_content["tmdb_show"] = []
+                overlay_content["tvdb_show"] = []
             else:
-                logging.info(f"Generating Overlay for {len(master_tmdb_ids)} series...")
+                logging.info(f"Generating Overlay for {len(unique_tmdb_ids)} TMDb shows and {len(unique_tvdb_ids)} TVDb shows...")
                 
                 final_overlay_style = merge_styles(global_defaults, overlay_override)
                 final_overlay_style = validate_font(final_overlay_style)
@@ -360,22 +469,19 @@ def main():
                 overlay_text = final_overlay_style.pop('text', 'RETURNING')
                 overlay_name = f"text({overlay_text})"
                 
-                kometa_data = {
-                    "overlays": {
-                        yaml_key: {
-                            "overlay": {
-                                "name": overlay_name,
-                                **final_overlay_style
-                            },
-                            "tmdb_show": master_tmdb_ids
-                        }
-                    }
-                }
+                # Update overlay with the final calculated name and style
+                overlay_content["overlay"]["name"] = overlay_name
+                overlay_content["overlay"].update(final_overlay_style)
+
+                overlay_content["tmdb_show"] = unique_tmdb_ids
+                overlay_content["tvdb_show"] = unique_tvdb_ids
+            
+            kometa_data = {"overlays": {yaml_key: overlay_content}}
 
             try:
                 os.makedirs(os.path.dirname(overlay_output_path), exist_ok=True)
-                with open(overlay_output_path, 'w') as f:
-                    yaml.dump(kometa_data, f, sort_keys=False)
+                with open(overlay_output_path, 'w', encoding='utf-8') as f:
+                    yaml.dump(kometa_data, f, sort_keys=False, indent=2, allow_unicode=True)
                 logging.info(f"Successfully wrote config to: {overlay_output_path}")
             except Exception as e:
                 logging.error(f"Failed to write YAML: {e}")
