@@ -233,6 +233,21 @@ fi
 # MODE 2: THE TRIGGER
 # =======================================================
 
+# Detect if called from an *arr (Sonarr, Radarr, etc.)
+# They set sonarr_eventtype / radarr_eventtype in the environment.
+ARR_EVENT="${sonarr_eventtype:-${radarr_eventtype:-}}"
+ARR_CALLER=false
+if [ -n "$ARR_EVENT" ]; then
+    ARR_CALLER=true
+fi
+
+# *arr sends a "Test" event when you click "Test" in the UI — just confirm and exit.
+if [ "$ARR_EVENT" = "Test" ]; then
+    echo "[$(date '+%H:%M:%S')] Test event received from *arr. Script is reachable." >> "$LOG_FILE"
+    echo "Test OK"
+    exit 0
+fi
+
 # PARSE ARGUMENTS
 FORCE_RUN=false
 SHOW_HELP=false
@@ -265,7 +280,7 @@ fi
 # EXECUTE TRIGGER LOGIC - WITH PERMISSION CHECK
 if [ "$FORCE_RUN" = true ]; then
     TARGET_TIME=$(date +%s)
-    
+
     # Attempt update, fail if permission denied
     if ! echo "$TARGET_TIME" > "$TIMER_FILE"; then
         echo "[ERROR] Failed to update timer file at $TIMER_FILE."
@@ -273,14 +288,16 @@ if [ "$FORCE_RUN" = true ]; then
         echo "[FIX]   Run: sudo rm $TIMER_FILE"
         exit 1
     fi
-    
+
     echo "[$(date '+%H:%M:%S')] Trigger received with --now. Starting immediately." >> "$LOG_FILE"
-    echo "-----------------------------------------------------"
-    echo " Kometa Sync Triggered (IMMEDIATE)!"
-    echo "-----------------------------------------------------"
+    if [ "$ARR_CALLER" = false ]; then
+        echo "-----------------------------------------------------"
+        echo " Kometa Sync Triggered (IMMEDIATE)!"
+        echo "-----------------------------------------------------"
+    fi
 else
     TARGET_TIME=$(($(date +%s) + $WAIT_TIME))
-    
+
     # Attempt update, fail if permission denied
     if ! echo "$TARGET_TIME" > "$TIMER_FILE"; then
         echo "[ERROR] Failed to update timer file at $TIMER_FILE."
@@ -289,21 +306,30 @@ else
         exit 1
     fi
 
-    echo "[$(date '+%H:%M:%S')] Trigger received from user: $(whoami). Timer set to +$WAIT_TIME sec." >> "$LOG_FILE"
-    echo "-----------------------------------------------------"
-    echo " Kometa Sync Triggered!"
-    echo "-----------------------------------------------------"
-    echo " The script is now waiting $WAIT_TIME seconds for other imports."
+    if [ "$ARR_CALLER" = true ]; then
+        echo "[$(date '+%H:%M:%S')] Trigger received from *arr (event: $ARR_EVENT). Timer set to +$WAIT_TIME sec." >> "$LOG_FILE"
+    else
+        echo "[$(date '+%H:%M:%S')] Trigger received from user: $(whoami). Timer set to +$WAIT_TIME sec." >> "$LOG_FILE"
+        echo "-----------------------------------------------------"
+        echo " Kometa Sync Triggered!"
+        echo "-----------------------------------------------------"
+        echo " The script is now waiting $WAIT_TIME seconds for other imports."
+    fi
 fi
-
-echo " Logs are being written to: $LOG_FILE"
 
 # Launch Background Worker
 export KOMETA_WORKER_MODE="true"
 nohup "$0" >> "$LOG_FILE" 2>&1 &
 WORKER_PID=$!
 
-# AUTO-WATCH: Always tail the log
+# When called from an *arr, exit immediately so the arr doesn't time out waiting.
+# The worker continues in the background via nohup.
+if [ "$ARR_CALLER" = true ]; then
+    exit 0
+fi
+
+# Interactive mode: tail the log so the user can watch progress.
+echo " Logs are being written to: $LOG_FILE"
 echo " Watching logs now (Ctrl+C to stop watching, process will continue in background)..."
 echo "-----------------------------------------------------"
 # Try to tail using the PID to stop automatically when done (gnu tail feature)
