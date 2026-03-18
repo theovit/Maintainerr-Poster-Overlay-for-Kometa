@@ -8,12 +8,13 @@ It also includes a **Returning Series Manager** that integrates with Sonarr to c
 ## ✨ Features
 
 * **Dynamic Overlays:** Automatically generates Kometa config files to display "Expiring in X Days" or "Deletion: X Hours".
-* **Returning Series Manager:** Scans Sonarr for "Continuing" or "Upcoming" series that have no files on disk. It creates a monitored "stub" file and ensures the show is visible in Plex with a "RETURNING" overlay.
+* **Returning Series Manager:** Scans Sonarr for continuing/upcoming series with no files on disk (including Maintainerr-unmonitored shows). Creates stub files, labels shows in Plex, and generates three overlay tiers: `NO EPISODES YET`, `RETURNS APR 20` (when a date is known), or `TBA` (no known date).
+* **Auto Re-Monitor:** When a returning show's first real episode drops, the script automatically sets the series back to fully monitored in Sonarr so you can rewatch from the beginning.
 * **Asset Grabber:** Downloads clean posters from Plex (or upstream metadata providers) before applying overlays to prevent "burned-in" loops.
 * **Smart Debounce:** The `trigger.sh` wrapper handles batch imports (e.g., Season Packs) by waiting for "silence" before running, preventing multiple concurrent executions.
 * **Global & Specific Styles:** Define a universal look (font, alignment, size) and override specific urgency levels (Critical, Warning, Notice, Returning).
 * **Dual-Mode Output:** Generates separate YAML files for Movies and Shows to satisfy Kometa's strict validation.
-* **Script Chaining:** Built-in support for running external scripts (TSSK) within the pipeline.
+* **Script Chaining:** Built-in support for running any external scripts (Python or shell) as part of the pipeline.
 
 # 🚀 Installation
 Clone the repository:
@@ -83,6 +84,7 @@ Where the generated Kometa YAML files will be saved.
       movies_path: "/path/to/kometa/config/overlays/maintainerr_overlays_movies.yaml"
       shows_path: "/path/to/kometa/config/overlays/maintainerr_overlays_shows.yaml"
       returning_path: "/path/to/kometa/config/overlays/returning_overlays.yaml"
+      returning_dates_path: "/path/to/kometa/config/overlays/returning_dates_overlays.yaml"
 
 ### 3. Triggers
 Define the thresholds (in days) for each urgency level.
@@ -141,7 +143,7 @@ Configure the wrapper behavior and file locations.
       
       # Kometa Location
       kometa_path: "/path/to/kometa.py"
-      kometa_args: "--run"
+      kometa_args: "--run-overlays"  # overlay-only pass; full --run stays on background Kometa's schedule
 
 ### 8. Returning Series Manager
 Configures the dummy file creation for upcoming shows.
@@ -155,12 +157,28 @@ Configures the dummy file creation for upcoming shows.
         text: "NO EPISODES YET"
         back_color: "#0077CCFF" # Blue
 
+      # Overlay for shows with a known return date (e.g. "RETURNS APR 20")
+      returning_dates:
+        enabled: true
+        path: "/path/to/kometa/config/overlays/returning_dates_overlays.yaml"
+        text_format: "RETURNS {date}"
+        group: "TSSK_text"   # must match TSSK's overlay group so this overrides it
+        weight: 15           # higher than TSSK returning (10), lower than new season soon (25)
+
+      # Overlay for shows with no known return date (e.g. "TBA")
+      tba_overlay:
+        enabled: true
+        path: "/path/to/kometa/config/overlays/returning_tba_overlays.yaml"
+        text: "TBA"
+        group: "TSSK_text"
+        weight: 12
+
 # 🤖 Automation (Sonarr / Radarr)
 To trigger this script automatically when new media is added:
 
 1.  Go to: **Settings > Connect > + > Custom Script**.
 2.  Name: **Kometa Sync**.
-3.  Triggers: Check **On Import** and **On Upgrade**.
+3.  Triggers: Check **On File Import** and **On File Upgrade**.
 4.  Path: Select the `trigger.sh` file.
 5.  Save.
 
@@ -183,6 +201,8 @@ Add the generated overlay files to your main Kometa `config.yml`.
         overlay_files:
           - file: config/overlays/maintainerr_overlays_shows.yaml
           - file: config/overlays/returning_overlays.yaml
+          - file: config/overlays/returning_dates_overlays.yaml
+          - file: config/overlays/returning_tba_overlays.yaml
 
 # 🛠️ Manual Usage
 ### Run the full pipeline (Wait 5 mins + Sync):

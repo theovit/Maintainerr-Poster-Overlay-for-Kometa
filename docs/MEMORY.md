@@ -51,6 +51,18 @@ if self.poster_upload_delay > 0: time.sleep(self.poster_upload_delay)
 
 Set `poster_upload_delay: 2` (seconds) in Kometa's `config.yml` under `settings:`.
 
+Also patched `modules/plex.py` to add `api_call_delay` — wraps `session.send` to throttle ALL Plex API calls (reads + writes). Add alongside `poster_upload_delay` in `config.py` and `library.py`, then wrap session in `plex.py __init__` after `PlexServer(...)` is created:
+```python
+if self.api_call_delay > 0:
+    import time as _t; _d = self.api_call_delay; _o = self.session.send
+    def _s(req, **kw): r = _o(req, **kw); _t.sleep(_d); return r
+    self.session.send = _s
+```
+Set `api_call_delay: 0.1` in Kometa's `config.yml`. Use `kometa_args: --run-overlays` in project `config.yaml` so the trigger only applies overlays (not collections/playlists) — full `--run` is handled by background Kometa's own schedule.
+
+## Stale flock lock after background Kometa restart
+When the worker restarts background Kometa via `nohup`, the child process inherits fd 200 (the lock file descriptor) and holds the flock forever. Every subsequent trigger worker hits `flock -n 200 || exit 0` and dies silently — no log output, no pipeline run. Fixed in `trigger.sh` by `exec 200>&-` before the `nohup` spawn. If you ever see triggers firing (log shows "Trigger received") but the pipeline never runs, check with `fuser tmp/kometa_sync.lock` — if it shows the background Kometa PID, kill it to release the lock.
+
 ## Kometa optimize: false
 `optimize: true` in Kometa's Plex config runs a DB optimization after every run — heavy enough to crash the Plex web UI. Kept as `false`. Don't re-enable it.
 

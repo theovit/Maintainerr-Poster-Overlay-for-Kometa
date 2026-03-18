@@ -1,13 +1,11 @@
 # TODO
 
 ## High
-- [ ] Debug why trigger.sh doesn't fire from Sonarr/Radarr custom script webhooks — investigate env, path, permissions
-- [ ] Re-monitor series in Sonarr when first real episode appears — call Sonarr PUT /api/v3/series to set monitored=true + all episodes monitored when cleanup_real_media runs
-- [ ] Release date overlays — when Sonarr has a `nextAiring` date, show it in the returning overlay instead of generic "RETURNING"; evaluate TSSK fork vs custom approach
+- [ ] returning_series_tba overlay style — currently inherits returning_series style; may want distinct color/text to visually separate "no date" from "returning with date"
 
 ## Medium
-- [ ] Cache season list in asset-grabber to minimize Plex API calls (currently calls item.seasons() per show)
 - [ ] install.sh JSON injection vulnerability (passwords with special chars passed via python -c)
+- [ ] Tune Kometa api_call_delay — 0.1s crashes Plex web UI, 0.5s is stable but slow; find the minimum safe value
 
 ## Long-term
 - [ ] Docker image / compose file for containerized deployment

@@ -11,13 +11,17 @@
 - [stable] Dual-mode ID resolution: tries tmdbId/tvdbId fields, then plexData.guids, then main guid string
 
 ## Returning Series Manager
-- [stable] Scans all configured Sonarr instances for monitored shows with status `continuing` or `upcoming`
+- [stable] Scans all configured Sonarr instances for shows with status `continuing` or `upcoming` — including unmonitored shows (handles Maintainerr's unmonitor-on-manage pattern)
 - [stable] Creates stub `.mp4` files (S00E99 format) for shows with no episodes on disk
 - [stable] Enforces Sonarr media management settings (Create Empty Folders = true, Delete Empty Folders = false)
 - [stable] Adds `series-returning-lock` Plex label to stub shows
 - [stable] Marks stub episode as watched in Plex so it doesn't appear in "Continue Watching"
 - [stable] Cleans up stub files and removes Plex label when real media is detected
-- [stable] Generates `returning_overlays.yaml` for Kometa with configurable overlay style
+- [stable] Re-monitors series and all episodes in Sonarr when first real episode appears (so you can rewatch from the beginning)
+- [stable] Generates `returning_overlays.yaml` — `NO EPISODES YET` overlay for shows with zero episode files
+- [stable] Generates `returning_dates_overlays.yaml` — `RETURNS APR 20` style overlay for shows with a known `nextAiring` date in Sonarr
+- [stable] Generates `returning_tba_overlays.yaml` — `TBA` overlay for continuing shows with no known air date
+- [stable] Date overlays slot into TSSK's overlay group at higher weight — automatically overrides generic "RETURNING" text for shows with a known date
 - [stable] Path mapping support for remote Sonarr / local script setups
 - [stable] Multi-instance Sonarr support
 
@@ -37,6 +41,10 @@
 - [stable] Permission error detection on timer/lock files with actionable fix message
 - [stable] Config-driven: all paths and settings read from `config.yaml` at runtime
 - [stable] Generic external scripts system: runs arbitrary scripts (Python or shell) as step 2, with per-script name/path/args/enabled control
+- [stable] `--run-overlays` mode: trigger uses overlay-only Kometa pass; full `--run` stays on background Kometa's schedule to avoid crashing Plex web UI
+- [stable] Stops background Kometa before triggered run, restarts it after — prevents two Kometa processes hammering Plex simultaneously
+- [stable] Stale flock fix: closes fd 200 before spawning background Kometa so child process cannot hold the lock indefinitely
+- [stable] *arr custom script support: caches config to disk so `python3` PATH unavailability in Docker containers doesn't block the trigger
 
 ## Installation
 - [stable] Interactive installer (`install.sh`) with guided config wizard
