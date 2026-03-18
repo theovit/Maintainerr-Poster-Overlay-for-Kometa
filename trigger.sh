@@ -24,8 +24,8 @@ try:
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
         exec_conf = config.get('execution', {})
-        tssk_conf = config.get('tssk', {})
         
+        # --- EXPORT BASIC VARS ---
         def set_var(name, val): print(f'{name}=\"{val}\"')
 
         set_var('WAIT_TIME', exec_conf.get('wait_time', 300))
@@ -40,8 +40,6 @@ try:
         
         set_var('ASSET_SCRIPT', get_abs_path('$BASE_DIR', exec_conf.get('asset_grabber_path', 'kometa_asset_grabber.py')))
         set_var('OVERLAY_SCRIPT', get_abs_path('$BASE_DIR', exec_conf.get('overlay_generator_path', 'kometa_maintainerr_overlay_yaml.py')))
-        
-        # --- RETURNING SERIES SCRIPT ---
         set_var('RETURNING_SCRIPT', get_abs_path('$BASE_DIR', 'returning_series_manager.py'))
 
         k_path = exec_conf.get('kometa_path', 'kometa.py')
@@ -51,19 +49,41 @@ try:
              set_var('KOMETA_SCRIPT', k_path)
         set_var('KOMETA_ARGS', exec_conf.get('kometa_args', '--run'))
 
-        # TSSK Settings
-        set_var('TSSK_ENABLED', str(tssk_conf.get('enabled', False)).lower())
-        
-        # Build TSSK Scripts Array
-        tssk_scripts = tssk_conf.get('scripts', [])
-        if isinstance(tssk_scripts, str): tssk_scripts = [tssk_scripts]
-        
-        # Convert all TSSK paths to absolute
-        abs_tssk = [get_abs_path('$BASE_DIR', s) for s in tssk_scripts]
-        
-        # Print as Bash Array
-        array_str = ' '.join([f'\"{s}\"' for s in abs_tssk])
-        print(f'TSSK_SCRIPTS=({array_str})')
+        # --- FIX: PARSE SCRIPTS CORRECTLY ---
+        # 1. Look in root 'scripts' (where your config has them) OR 'tssk.scripts'
+        script_list = config.get('scripts', [])
+        if not script_list:
+            script_list = config.get('tssk', {}).get('scripts', [])
+
+        paths = []
+        names = []
+        args = []
+
+        # 2. Handle the list of objects
+        for s in script_list:
+            # If entry is a dict {name: ..., path: ...}
+            if isinstance(s, dict):
+                if not s.get('enabled', True): continue
+                p = get_abs_path('$BASE_DIR', s.get('path', ''))
+                if p:
+                    paths.append(p)
+                    names.append(s.get('name', os.path.basename(p)))
+                    args.append(s.get('args', ''))
+            # If entry is just a string path
+            elif isinstance(s, str):
+                p = get_abs_path('$BASE_DIR', s)
+                if p:
+                    paths.append(p)
+                    names.append(os.path.basename(p))
+                    args.append('')
+
+        p_str = ' '.join(['\"' + x + '\"' for x in paths])
+        n_str = ' '.join(['\"' + x + '\"' for x in names])
+        a_str = ' '.join(['\"' + x + '\"' for x in args])
+
+        print(f'SCRIPT_PATHS=({p_str})')
+        print(f'SCRIPT_NAMES=({n_str})')
+        print(f'SCRIPT_ARGS=({a_str})')
 
 except Exception as e:
     sys.stderr.write(f\"Error parsing config.yaml: {e}\\n\")
@@ -115,6 +135,8 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
     # Switch to script dir
     cd "$BASE_DIR" || { echo "[ERROR] Could not cd to $BASE_DIR" >> "$LOG_FILE"; exit 1; }
 
+
+
     # --------------------------------
     # 1. Asset Grabber
     # --------------------------------
@@ -126,24 +148,47 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
     fi
 
     # --------------------------------
-    # 2. TSSK Scripts
+    # Step 2: Custom Scripts (Subshell Method)
     # --------------------------------
-    if [ "$TSSK_ENABLED" == "true" ]; then
-        echo "[$(date '+%H:%M:%S')] Step 2: Running TSSK Scripts..." >> "$LOG_FILE"
+    SCRIPT_COUNT=${#SCRIPT_PATHS[@]}
+    if [ "$SCRIPT_COUNT" -gt 0 ]; then
+        echo "Step 2: Found $SCRIPT_COUNT Configured Scripts"
         
-        count=1
-        for tssk_script in "${TSSK_SCRIPTS[@]}"; do
-            if [ -f "$tssk_script" ]; then
-                echo "[$(date '+%H:%M:%S')]   > Running TSSK #$count: $(basename "$tssk_script")" >> "$LOG_FILE"
-                $PYTHON_CMD "$tssk_script" >> "$LOG_FILE" 2>&1
+        for i in "${!SCRIPT_PATHS[@]}"; do
+            NAME="${SCRIPT_NAMES[$i]}"
+            SCRIPT="${SCRIPT_PATHS[$i]}"
+            ARGS="${SCRIPT_ARGS[$i]}"
+            NUM=$((i+1))
+
+            if [ -f "$SCRIPT" ]; then
+                S_DIR=$(dirname "$SCRIPT")
+                S_FILE=$(basename "$SCRIPT")
+                
+                echo " > [$NUM/$SCRIPT_COUNT] Running: $NAME"
+                echo "   (Path: $SCRIPT)"
+                
+                # --- SUBSHELL EXECUTION START ---
+                # We use ( ... ) to create a subshell. 
+                # Changes to 'cd' inside here DO NOT affect the main loop.
+                (
+                    cd "$S_DIR" || exit 1
+                    if [[ "$SCRIPT" == *.py ]]; then
+                        $PYTHON_CMD "$S_FILE" $ARGS
+                    else
+                        "./$S_FILE" $ARGS
+                    fi
+                )
+                # --- SUBSHELL EXECUTION END ---
+                
+                echo " > [$NUM/$SCRIPT_COUNT] Completed."
             else
-                echo "[$(date '+%H:%M:%S')]   > [ERROR] TSSK Script not found: $tssk_script" >> "$LOG_FILE"
+                echo " > [$NUM/$SCRIPT_COUNT] [ERROR] File not found: $SCRIPT"
             fi
-            ((count++))
         done
     else
-        echo "[$(date '+%H:%M:%S')] Step 2: TSSK Scripts (Disabled)" >> "$LOG_FILE"
+        echo "Step 2: No scripts to run."
     fi
+
 
     # --------------------------------
     # 3. Maintainerr Overlay Generator
@@ -165,6 +210,7 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
         echo "[$(date '+%H:%M:%S')] [WARN] Returning Series Script not found at $RETURNING_SCRIPT" >> "$LOG_FILE"
     fi
 
+
     # --------------------------------
     # 5. Kometa
     # --------------------------------
@@ -181,6 +227,7 @@ if [ "$KOMETA_WORKER_MODE" == "true" ]; then
     echo "[$(date '+%H:%M:%S')] All tasks completed." >> "$LOG_FILE"
     exit 0
 fi
+
 
 # =======================================================
 # MODE 2: THE TRIGGER

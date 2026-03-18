@@ -121,8 +121,13 @@ class KometaAssetGrabber:
     def download_image(self, url, filepath, plex_url, plex_token):
         if not url: return
 
-        if os.path.exists(filepath):
-            self.logger.debug(f"Skipping (Exists): {os.path.basename(filepath)}")
+        # 1. Smart Check: Don't re-download if ANY valid version exists (JPG or WebP)
+        base_path = os.path.splitext(filepath)[0]
+        if os.path.exists(base_path + ".jpg"):
+            self.logger.debug(f"Skipping (JPG Exists): {os.path.basename(base_path + '.jpg')}")
+            return
+        if os.path.exists(base_path + ".webp"):
+            self.logger.debug(f"Skipping (WebP Exists): {os.path.basename(base_path + '.webp')}")
             return
 
         try:
@@ -134,10 +139,18 @@ class KometaAssetGrabber:
             
             response = requests.get(full_url, headers=headers, stream=True, timeout=20)
             if response.status_code == 200:
-                with open(filepath, 'wb') as f:
+                # 2. Fix: Detect the REAL format from the headers
+                content_type = response.headers.get('Content-Type', '')
+                final_filepath = filepath
+
+                # If Plex sent a WebP, force the extension to .webp
+                if 'image/webp' in content_type:
+                    final_filepath = base_path + ".webp"
+                
+                with open(final_filepath, 'wb') as f:
                     for chunk in response.iter_content(1024):
                         f.write(chunk)
-                self.logger.info(f"Downloaded: {os.path.basename(filepath)}")
+                self.logger.info(f"Downloaded: {os.path.basename(final_filepath)}")
             else:
                 self.logger.error(f"HTTP {response.status_code} for {full_url}")
         except Exception as e:
