@@ -210,6 +210,25 @@ returning:
   # on removal — this re-enables them so you can rewatch from the beginning.
   remonitor_on_first_episode: true
 
+  # Generates a second overlay YAML for shows with a known next air date in Sonarr.
+  # Covers both "no episodes yet" and "returning" shows — e.g. "RETURNS APR 20".
+  # Uses TSSK's group/weight system so it overrides the generic "RETURNING" text.
+  # Load this file in Kometa AFTER the TSSK returning overlay file.
+  date_overlay:
+    enabled: true
+    path: "/path/to/kometa/config/overlays/returning_dates_overlays.yaml"
+    text_format: "RETURNS {date}"   # {date} is replaced with the formatted date
+    date_format: "%b %-d"           # strftime — e.g. "APR 20" (Linux: %-d strips leading zero)
+    group: "TSSK_text"              # must match the group name in your TSSK config
+    weight: 15                      # higher than TSSK returning (10), lower than new season soon (25)
+    # Visual style — should match your TSSK text_returning style
+    font_size: 70
+    font_color: "#ff9000"
+    horizontal_align: center
+    horizontal_offset: 0
+    vertical_align: bottom
+    vertical_offset: 50
+
   libraries:
     - "TV Shows"
     - "Anime"

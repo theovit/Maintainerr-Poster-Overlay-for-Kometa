@@ -440,14 +440,121 @@ def process_sonarr_instance(instance, plex_server, config_settings, dry_run=Fals
             if plex_server:
                 process_plex_label(plex_server, tmdb_id, tvdb_id, title, stub_suffix, dry_run)
             
-            # 3. Add to correct list for YAML generation
-            if tmdb_id:
-                instance_ids['tmdb_ids'].append(tmdb_id)
-            if tvdb_id:
-                instance_ids['tvdb_ids'].append(tvdb_id)
+            # 3. Add to overlay list — skip shows with a known air date,
+            #    they get the date overlay text instead of "NO EPISODES YET"
+            if show.get('nextAiring'):
+                logging.debug(f"  > [{name}] '{title}' has nextAiring {show['nextAiring'][:10]} — using date overlay instead of NO EPISODES YET")
+            else:
+                if tmdb_id:
+                    instance_ids['tmdb_ids'].append(tmdb_id)
+                if tvdb_id:
+                    instance_ids['tvdb_ids'].append(tvdb_id)
 
     logging.info(f"[{name}] Finished. TMDb IDs: {len(instance_ids['tmdb_ids'])}, TVDb IDs: {len(instance_ids['tvdb_ids'])}")
     return instance_ids
+
+def format_air_date(date_str, date_format="%b %-d"):
+    """Format a Sonarr ISO datetime string for display. Appends year if not current year."""
+    try:
+        from datetime import datetime, timezone
+        dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        now = datetime.now(timezone.utc)
+        fmt = date_format if dt.year == now.year else date_format + " %Y"
+        return dt.strftime(fmt).upper()
+    except Exception:
+        return None
+
+
+def generate_returning_date_overlays(sonarr_instances, date_overlay_cfg, dry_run=False):
+    """
+    Generates a Kometa overlay YAML for returning shows that have a known next air date
+    in Sonarr. Groups shows by date and writes one overlay entry per date, using the
+    TSSK group/weight system so it overrides the generic 'RETURNING' text only for
+    shows where a date is known.
+    """
+    output_path = date_overlay_cfg.get('path')
+    if not output_path:
+        logging.warning("date_overlay.path not set — skipping returning date overlays.")
+        return
+
+    text_format  = date_overlay_cfg.get('text_format', 'RETURNS {date}')
+    date_format  = date_overlay_cfg.get('date_format', '%b %-d')
+    group        = date_overlay_cfg.get('group', 'TSSK_text')
+    weight       = date_overlay_cfg.get('weight', 15)
+
+    # Build per-date groups: { "APR 8": {'tvdb_ids': [...], 'tmdb_ids': [...]} }
+    date_groups = {}
+
+    for instance in sonarr_instances:
+        name    = instance.get('name', 'Unknown')
+        url     = instance.get('url')
+        api_key = instance.get('api_key')
+        if not url or not api_key:
+            continue
+
+        for show in get_sonarr_series(name, url, api_key):
+            if show.get('status', '').lower() not in ['continuing', 'upcoming']:
+                continue
+            next_airing = show.get('nextAiring')
+            if not next_airing:
+                continue  # No known date — TSSK handles with generic "RETURNING" / our "NO EPISODES YET"
+
+            date_label = format_air_date(next_airing, date_format)
+            if not date_label:
+                continue
+
+            bucket = date_groups.setdefault(date_label, {'tvdb_ids': [], 'tmdb_ids': []})
+            if show.get('tvdbId'):
+                bucket['tvdb_ids'].append(show['tvdbId'])
+            if show.get('tmdbId'):
+                bucket['tmdb_ids'].append(show['tmdbId'])
+
+    if not date_groups:
+        logging.info("No returning shows with known air dates found — skipping date overlay.")
+        return
+
+    logging.info(f"Generating returning date overlays for {len(date_groups)} date group(s)...")
+
+    # Build overlay YAML entries — one per unique date
+    overlays_dict = {}
+    for date_label, ids in sorted(date_groups.items()):
+        text      = text_format.replace('{date}', date_label)
+        safe_key  = "returning_date_" + date_label.replace(' ', '_').replace(',', '').replace('/', '_')
+
+        overlay_cfg = {'name': f'text({text})', 'group': group, 'weight': weight}
+
+        # Apply any extra style keys from date_overlay config (font, colors, positioning)
+        for key in ('font', 'font_size', 'font_color', 'back_color', 'back_radius',
+                    'back_padding', 'back_width', 'back_height',
+                    'horizontal_align', 'horizontal_offset',
+                    'vertical_align', 'vertical_offset'):
+            val = date_overlay_cfg.get(key)
+            if val is not None:
+                overlay_cfg[key] = val
+
+        entry = {'overlay': overlay_cfg}
+        tvdb = sorted(set(ids['tvdb_ids']))
+        tmdb = sorted(set(ids['tmdb_ids']))
+        if tvdb:
+            entry['tvdb_show'] = tvdb
+        if tmdb:
+            entry['tmdb_show'] = tmdb
+
+        overlays_dict[safe_key] = entry
+        logging.info(f"  > {text}: {len(tvdb)} TVDb + {len(tmdb)} TMDb shows")
+
+    if dry_run:
+        logging.info(f"[DRY RUN] Would write {len(overlays_dict)} date overlay entries to {output_path}")
+        return
+
+    try:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        with open(output_path, 'w', encoding='utf-8') as f:
+            yaml.dump({'overlays': overlays_dict}, f, sort_keys=False, indent=2, allow_unicode=True)
+        logging.info(f"Written returning date overlays to: {output_path}")
+    except Exception as e:
+        logging.error(f"Failed to write returning date overlay YAML: {e}")
+
 
 def main():
     parser = argparse.ArgumentParser(description='Returning Series Manager')
@@ -488,6 +595,8 @@ def main():
     generate_overlay = returning_cfg.get('generate_overlay', False)
     overlay_output_path = output_cfg.get('returning_path')
     overlay_override = returning_cfg.get('overlay_style', {})
+    date_overlay_cfg = returning_cfg.get('date_overlay', {})
+    generate_date_overlay = date_overlay_cfg.get('enabled', False)
 
     if not sonarr_instances:
         logging.critical("No 'sonarr_instances' found under 'connect:' in config.yaml.")
@@ -560,6 +669,10 @@ def main():
                 logging.info(f"Successfully wrote config to: {overlay_output_path}")
             except Exception as e:
                 logging.error(f"Failed to write YAML: {e}")
+
+    # 8. Generate returning date overlays (RETURNS APR 20 etc.)
+    if generate_date_overlay:
+        generate_returning_date_overlays(sonarr_instances, date_overlay_cfg, dry_run)
 
     logging.info("Returning Series Manager completed.")
 
