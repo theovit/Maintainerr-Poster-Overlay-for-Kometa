@@ -27,11 +27,16 @@ Kometa runs continuously (`--log-requests`) as a persistent process — it is no
 Reads all Maintainerr collections via REST API, computes time-remaining for each item, classifies items into urgency tiers (Critical / Warning / Notice / Monitor), and writes two Kometa overlay YAML files (movies and shows). Groups items by `{time_string}|{urgency}` to produce one overlay definition per time bucket.
 
 ### `returning_series_manager.py`
-Connects to one or more Sonarr instances, finds monitored shows that are `continuing` or `upcoming` with no episode files on disk, and:
-1. Creates a stub `.mp4` file (named `{title} - S00E99{stub_suffix}`) in the show's local folder
-2. Labels the show in Plex (`series-returning-lock`) and marks the stub episode as watched
-3. For shows that now *have* files: deletes the stub and removes the Plex label
-4. Writes a `returning_overlays.yaml` for Kometa
+Connects to one or more Sonarr instances, finds monitored shows that are `continuing` or `upcoming`, and:
+1. **Stub management** — shows with zero episode files get a stub `.mp4` (`{title} - S00E99{stub_suffix}`) in the show folder, a `series-returning-lock` Plex label, and the episode marked as watched
+2. **Cleanup** — shows that now *have* files get their stub deleted, Plex label removed, and (optionally) all episodes re-monitored in Sonarr (`remonitor_on_first_episode`)
+3. **Overlay generation** — writes `returning_overlays.yaml` using a three-bucket classification:
+   - `dated` — zero-ep stubs with a known `nextAiring` date → "NO EPISODES YET" strip only (date overlay handles the bottom label)
+   - `undated` — zero-ep stubs with no date → "NO EPISODES YET" + "T B A" strips
+   - `with_eps_tba` — shows with files but no `nextAiring` → "T B A" strip only (overrides TSSK "RETURNING")
+4. **Date overlays** — optionally writes `returning_dates_overlays.yaml` with one "RETURNS {date}" entry per unique air date, using the `TSSK_text` group/weight system
+
+Overlay strips use separate Kometa groups (`TSSK_stub` / `TSSK_text`) so two labels can render simultaneously on the same poster without group-exclusion conflicts.
 
 Currently Sonarr-only. Radarr instances exist on the server but are not yet integrated.
 
@@ -117,7 +122,9 @@ global_defaults:     text, font, font_size, font_color, back_color, back_radius,
                      horizontal_align, vertical_align, horizontal_offset, vertical_offset
 styles:              critical/warning/notice/monitor (same keys, null = inherit)
 assets:              enabled, path, grab_originals, libraries[]
-returning:           generate_overlay, template_file, stub_suffix, log_level, overlay_style{}
+returning:           generate_overlay, tba_text, template_file, stub_suffix, remonitor_on_first_episode,
+                     log_level, overlay_style{}, tba_style{},
+                     date_overlay{enabled, path, text_format, date_format, group, weight, font_*, ...}
 execution:           wait_time, python_cmd, lock_file, timer_file, log_file,
                      asset_grabber_path, overlay_generator_path, kometa_path, kometa_args
 scripts:             [{name, path, args, enabled}]   ← root-level; replaces tssk.scripts

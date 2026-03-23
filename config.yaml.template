@@ -198,7 +198,7 @@ execution:
 returning:
   # NEW: Toggle to enable/disable the YAML generator script
   generate_overlay: true
-  tba_text: "NOT RELEASED"  # Overlay text for shows with 0 episodes and no release date announced
+  tba_text: "T B A"  # Overlay text for shows WITH real episodes but no next air date yet
   # Path to a blank video file template (optional)
   # If this file is missing, the script will try to use FFMPEG to generate a black screen.
   template_file: "/path/to/kometa/config/assets/blank.mp4"
@@ -228,7 +228,7 @@ returning:
     horizontal_align: center
     horizontal_offset: 0
     vertical_align: bottom
-    vertical_offset: 50
+    vertical_offset: 55
 
   libraries:
     - "TV Shows"
@@ -236,17 +236,43 @@ returning:
   # Logging Level (DEBUG, INFO, WARNING, ERROR)
   log_level: "INFO"
 
-  # --- NO MEDIA OVERLAY STYLE (Kometa) ---
-  # Any setting set to ~ (null) will use the Global Default above.
+  # --- NO EPISODES YET overlay style (secondary strip) ---
+  # Renders in TSSK_stub group (separate from TSSK_text) so it appears additively
+  # above the primary bottom label (TBA or RETURNS DATE).
+  # back_color/back_radius/back_padding are NOT set here — background is handled
+  # entirely by the separate backdrop overlay defined via backdrop_* keys.
+  # vertical_offset formula: backdrop_vertical_offset + backdrop_height/2 - font_size/2
   overlay_style:
     text: "NO EPISODES YET"
+    group: "TSSK_stub"
+    weight: 20
+    backdrop_color: "#1c2333"    # dark strip behind text
+    backdrop_height: 90
+    backdrop_width: 950
+    backdrop_group: "TSSK_stub_backdrop"
+    backdrop_weight: 20
+    backdrop_vertical_offset: 130  # backdrop bottom edge from poster bottom (px)
     font: ~
-    font_size: ~
-    font_color: "#FFFFFF"
-    back_color: "#0077CCFF" # Blue
-    back_radius: ~
-    back_padding: ~
-    horizontal_align: ~ # Uses global (right)
-    vertical_align: ~ # Uses global (bottom)
-    horizontal_offset: ~ # Uses global
-    vertical_offset: ~ # Uses global
+    font_size: 70
+    font_color: "#7ec8e3"
+    horizontal_align: center
+    horizontal_offset: 0
+    vertical_align: bottom
+    vertical_offset: 145           # = 130 + 45 - 35 + 5 → text centered in the 90px band (+5 visual nudge)
+
+  # --- T B A overlay style (primary bottom strip) ---
+  # Merges on top of overlay_style — must explicitly re-declare group, position,
+  # and backdrop settings since overlay_style is configured for the secondary strip.
+  # Colors match the TSSK RETURNING overlay for visual consistency.
+  tba_style:
+    group: "TSSK_text"
+    weight: 12
+    backdrop_group: "TSSK_backdrop"
+    backdrop_weight: 12
+    backdrop_color: "#001f3f"    # matches TSSK RETURNING backdrop exactly
+    backdrop_vertical_offset: 20
+    backdrop_width: 950
+    font_color: "#ff9000"        # matches TSSK orange
+    horizontal_align: center
+    horizontal_offset: 0
+    vertical_offset: 35          # = 20 + 45 - 35 + 5 → text centered in the 90px band (+5 visual nudge)

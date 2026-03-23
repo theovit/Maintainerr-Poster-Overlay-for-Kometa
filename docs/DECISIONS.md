@@ -42,6 +42,20 @@
 **Alternatives considered:** Keeping TSSK-specific with a second config key for non-TSSK scripts — more config complexity for no gain.
 **Consequences:** Old `tssk.enabled` config key is now ignored. Existing configs must move script entries to root-level `scripts:` list. The `config.yaml.template` needs updating.
 
+## Additive overlay strategy for stub shows via dual Kometa groups
+**Date:** 2026-03-22
+**Decision:** Stubs (0-episode shows) with a known return date render two independent overlay strips: "RETURNS DATE" at the bottom (existing `TSSK_text` group, weight 15) and "NO EPISODES YET" above it (new `TSSK_stub` group at `vertical_offset: 160`). They are in different Kometa groups so both render simultaneously.
+**Why:** Kometa's group system is exclusive within a group — only the highest-weight overlay per group renders per show. To show two labels at once, they must be in separate groups at different vertical positions. The `TSSK_text` group handles the primary label; `TSSK_stub` is reserved for the "no episodes" indicator.
+**Alternatives considered:** Combining both into a single label like "NO EPISODES · RETURNS APR 3" — too complex to generate and not visually consistent with TSSK style. Putting both in TSSK_text at same position — only one can render.
+**Consequences:** Two new Kometa groups (`TSSK_stub`, `TSSK_stub_backdrop`) are added. Shows with 0 episodes AND a next air date are now included in `returning_dates_overlays.yaml` (the 0-episode filter was removed from `generate_returning_date_overlays()`).
+
+## TBA overlay reassigned from stubs-without-date to eps-but-no-date
+**Date:** 2026-03-22
+**Decision:** "T B A" is now applied to shows that have real episodes but no known next air date (`with_eps_tba` bucket), rather than 0-episode stubs without a date (which now show "NO EPISODES YET"). Style uses TSSK orange (#ff9000) to match the TSSK aesthetic.
+**Why:** "T B A" semantically means "date is unknown" which is only relevant when a show has episodes and is returning. A show with no episodes communicates more clearly with "NO EPISODES YET". TSSK already shows "R E T U R N I N G" for these shows; "T B A" at weight 12 supersedes "RETURNING" at weight 10 in the same group.
+**Alternatives considered:** Keeping TBA for stubs — was original behavior but conflated two different states.
+**Consequences:** `tba_text` config key now applies to the with-eps-no-date case, not to undated stubs.
+
 ## WebP content-type detection in asset-grabber
 **Date:** 2026-03-17
 **Decision:** `asset-grabber.py` now detects the actual `Content-Type` header from Plex's image response and saves as `.webp` if Plex returns `image/webp`, rather than always saving as `.jpg`.

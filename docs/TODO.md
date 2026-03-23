@@ -1,7 +1,7 @@
 # TODO
 
 ## High
-- [ ] returning_series_tba overlay style — currently inherits returning_series style; may want distinct color/text to visually separate "no date" from "returning with date"
+- [ ] Debug why trigger.sh doesn't fire from Sonarr/Radarr custom script webhooks — investigate env, path, permissions
 
 ## Medium
 - [ ] install.sh JSON injection vulnerability (passwords with special chars passed via python -c)

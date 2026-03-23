@@ -68,3 +68,12 @@ When the worker restarts background Kometa via `nohup`, the child process inheri
 
 ## Two Sonarr and two Radarr instances
 TV Shows and Anime each have their own Sonarr instance. Movies and Anime Movies each have their own Radarr instance. The overlay scripts currently only integrate with Sonarr. Radarr instances are defined in `config.yaml` under `radarr_instances` but nothing reads that key yet.
+
+## Text vertical_offset formula includes +5 visual nudge
+Mathematical center of a 90px backdrop with 70px font is `backdrop_vertical_offset + 45 - 35 = backdrop_vertical_offset + 10`. However, font baselines cause text to render visually low (bottom-heavy) at the mathematical center. All returning series text overlays add a +5px nudge on top: `backdrop_vertical_offset + 10 + 5 = backdrop_vertical_offset + 15`. Applied to: `tba_style` (35), `overlay_style` (145), `date_overlay` (55). Don't revert this to the pure math — the result will look off-center.
+
+## Kometa groups used by returning series overlays
+- `TSSK_stub` / `TSSK_stub_backdrop` — "NO EPISODES YET" secondary strip (vertical_offset 145)
+- `TSSK_text` — primary bottom label (TBA at weight 12, RETURNS DATE at weight 15; both beat TSSK RETURNING at weight 10)
+- `TSSK_backdrop` — backdrop for the primary bottom strip
+These group names must match what TSSK uses in its own overlay YAML files.

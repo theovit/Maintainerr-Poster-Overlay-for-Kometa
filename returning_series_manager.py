@@ -370,7 +370,10 @@ def validate_font(style_dict):
 def process_sonarr_instance(instance, plex_server, config_settings, dry_run=False):
     """
     Processes a single Sonarr instance.
-    Returns 'dated' and 'undated' buckets (shows with/without nextAiring).
+    Returns three buckets:
+      'dated'        — stubs (0 eps) with a known nextAiring date
+      'undated'      — stubs (0 eps) with no nextAiring date
+      'with_eps_tba' — shows that have real episodes but no nextAiring date
     """
     name = instance.get('name', 'Unknown')
     url = instance.get('url')
@@ -383,7 +386,7 @@ def process_sonarr_instance(instance, plex_server, config_settings, dry_run=Fals
 
     if not all([url, api_key, sonarr_base_path, local_base_path]):
         logging.error(f"[{name}] Skipping: Missing url, api_key, or path_mapping settings.")
-        return {'dated':{'tmdb_ids':[],'tvdb_ids':[]},'undated':{'tmdb_ids':[],'tvdb_ids':[]}}
+        return {'dated':{'tmdb_ids':[],'tvdb_ids':[]},'undated':{'tmdb_ids':[],'tvdb_ids':[]},'with_eps_tba':{'tmdb_ids':[],'tvdb_ids':[]}}
 
     ensure_sonarr_settings(name, url, api_key)
 
@@ -392,7 +395,11 @@ def process_sonarr_instance(instance, plex_server, config_settings, dry_run=Fals
     remonitor_on_first_episode = config_settings.get('remonitor_on_first_episode', True)
 
     series_list = get_sonarr_series(name, url, api_key)
-    instance_ids = {'dated':{'tmdb_ids':[],'tvdb_ids':[]},'undated':{'tmdb_ids':[],'tvdb_ids':[]}}
+    instance_ids = {
+        'dated':        {'tmdb_ids': [], 'tvdb_ids': []},
+        'undated':      {'tmdb_ids': [], 'tvdb_ids': []},
+        'with_eps_tba': {'tmdb_ids': [], 'tvdb_ids': []},
+    }
 
     logging.info(f"[{name}] Scanning {len(series_list)} shows...")
 
@@ -425,6 +432,13 @@ def process_sonarr_instance(instance, plex_server, config_settings, dry_run=Fals
             cleanup_real_media(plex_server, local_show_path, stub_suffix, tmdb_id, tvdb_id, title, dry_run)
             if remonitor_on_first_episode:
                 remonitor_sonarr_series(name, url, api_key, show, dry_run)
+            # Track shows with real episodes but no known return date for TBA overlay
+            if not show.get('nextAiring'):
+                if not tmdb_id and not tvdb_id:
+                    continue
+                bucket = 'with_eps_tba'
+                if tmdb_id: instance_ids[bucket]['tmdb_ids'].append(tmdb_id)
+                if tvdb_id: instance_ids[bucket]['tvdb_ids'].append(tvdb_id)
         else:
             # This show has NO files, so it's a candidate for the overlay
             if not tmdb_id and not tvdb_id:
@@ -440,13 +454,15 @@ def process_sonarr_instance(instance, plex_server, config_settings, dry_run=Fals
             if plex_server:
                 process_plex_label(plex_server, tmdb_id, tvdb_id, title, stub_suffix, dry_run)
             
-            # 3. Split: dated (known return) vs undated (TBA)
+            # 3. Split: dated (known return date) vs undated (no date yet)
             bucket = 'dated' if show.get('nextAiring') else 'undated'
             if tmdb_id: instance_ids[bucket]['tmdb_ids'].append(tmdb_id)
             if tvdb_id: instance_ids[bucket]['tvdb_ids'].append(tvdb_id)
 
-    d=instance_ids['dated']; u=instance_ids['undated']
-    logging.info(f"[{name}] Dated: {len(d['tmdb_ids'])+len(d['tvdb_ids'])}, Undated: {len(u['tmdb_ids'])+len(u['tvdb_ids'])}")
+    d=instance_ids['dated']; u=instance_ids['undated']; t=instance_ids['with_eps_tba']
+    logging.info(f"[{name}] Stubs dated: {len(d['tmdb_ids'])+len(d['tvdb_ids'])}, "
+                 f"undated: {len(u['tmdb_ids'])+len(u['tvdb_ids'])}, "
+                 f"with-eps TBA: {len(t['tmdb_ids'])+len(t['tvdb_ids'])}")
     return instance_ids
 
 def format_air_date(date_str, date_format="%b %-d"):
@@ -490,11 +506,6 @@ def generate_returning_date_overlays(sonarr_instances, date_overlay_cfg, dry_run
 
         for show in get_sonarr_series(name, url, api_key):
             if show.get('status', '').lower() not in ['continuing', 'upcoming']:
-                continue
-            # Skip shows with no episodes — they already get "NO EPISODES YET" / "NOT RELEASED"
-            # overlays from returning_overlays.yaml. Date overlays are only for shows that
-            # have existing episodes and are returning for a new season.
-            if show.get('statistics', {}).get('episodeFileCount', 0) == 0:
                 continue
 
             next_airing = show.get('nextAiring')
@@ -614,43 +625,123 @@ def main():
             logging.error(f"Failed to connect to Plex: {e}")
 
     # 5. PROCESS INSTANCES
-    master = {'dated': {'tmdb_ids': [], 'tvdb_ids': []}, 'undated': {'tmdb_ids': [], 'tvdb_ids': []}}
+    master = {
+        'dated':        {'tmdb_ids': [], 'tvdb_ids': []},
+        'undated':      {'tmdb_ids': [], 'tvdb_ids': []},
+        'with_eps_tba': {'tmdb_ids': [], 'tvdb_ids': []},
+    }
     for instance in sonarr_instances:
         logging.info(f"--- Starting Instance: {instance.get('name')} ---")
         res = process_sonarr_instance(instance, plex_server, config_settings, dry_run)
-        for b in ('dated', 'undated'):
+        for b in ('dated', 'undated', 'with_eps_tba'):
             master[b]['tmdb_ids'].extend(res[b]['tmdb_ids'])
             master[b]['tvdb_ids'].extend(res[b]['tvdb_ids'])
         logging.info(f"--- Instance {instance.get('name')} finished ---")
     def dedup(ids): return sorted(list(set(ids)))
-    dated_tmdb   = dedup(master['dated']['tmdb_ids'])
-    dated_tvdb   = dedup(master['dated']['tvdb_ids'])
-    undated_tmdb = dedup(master['undated']['tmdb_ids'])
-    undated_tvdb = dedup(master['undated']['tvdb_ids'])
-    logging.info(f"Dated: {len(dated_tmdb)+len(dated_tvdb)}, Undated: {len(undated_tmdb)+len(undated_tvdb)}")
+    dated_tmdb        = dedup(master['dated']['tmdb_ids'])
+    dated_tvdb        = dedup(master['dated']['tvdb_ids'])
+    undated_tmdb      = dedup(master['undated']['tmdb_ids'])
+    undated_tvdb      = dedup(master['undated']['tvdb_ids'])
+    with_eps_tba_tmdb = dedup(master['with_eps_tba']['tmdb_ids'])
+    with_eps_tba_tvdb = dedup(master['with_eps_tba']['tvdb_ids'])
+    logging.info(f"Stubs dated: {len(dated_tmdb)+len(dated_tvdb)}, "
+                 f"undated: {len(undated_tmdb)+len(undated_tvdb)}, "
+                 f"with-eps TBA: {len(with_eps_tba_tmdb)+len(with_eps_tba_tvdb)}")
 
     # 7. Generate YAML
     if generate_overlay:
         if not overlay_output_path:
             logging.error("returning_path missing")
         else:
-            tba_text=returning_cfg.get("tba_text","NOT RELEASED")
-            fs=validate_font(merge_styles(global_defaults,overlay_override))
-            ov_text=fs.get("text","NO EPISODES YET")
-            def mk(text,tm,tv):
-                s=dict(fs);s.pop("text",None)
-                o={"overlay":{"name":f"text({text})"}}
-                o["overlay"].update(s);o["tmdb_show"]=tm;o["tvdb_show"]=tv
+            tba_text = returning_cfg.get("tba_text", "T B A")
+            # Base style: global_defaults + overlay_style.
+            # overlay_style defines the NO EPISODES YET secondary strip (TSSK_stub, offset 160).
+            fs = validate_font(merge_styles(global_defaults, overlay_override))
+            ov_text = fs.get("text", "NO EPISODES YET")
+
+            # fs_stub = fs plus any optional stub_dated_overlay_style overrides.
+            # If stub_dated_overlay_style is absent, fs_stub == fs (overlay_style is already correct).
+            stub_dated_override = returning_cfg.get('stub_dated_overlay_style', {})
+            fs_stub = validate_font(merge_styles(fs, stub_dated_override))
+
+            # Style for TBA (shows with real eps, no next air date). Inherits from fs.
+            tba_override = returning_cfg.get('tba_style', {})
+            fs_tba = validate_font(merge_styles(fs, tba_override))
+
+            # Keys that belong to the backdrop entry, not the text overlay.
+            # back_color/back_radius/back_padding create a tight bounding-box behind text in Kometa
+            # (the "blocky" look) — background is handled entirely by the separate backdrop overlay.
+            _BD_KEYS = {'text', 'backdrop_color', 'backdrop_height', 'backdrop_width',
+                        'backdrop_group', 'backdrop_weight', 'backdrop_vertical_offset',
+                        'back_color', 'back_radius', 'back_padding'}
+
+            def mk_text(text, style, tm, tv):
+                s = {k: v for k, v in style.items() if k not in _BD_KEYS and v is not None}
+                o = {"overlay": {"name": f"text({text})"}}
+                o["overlay"].update(s)
+                o["tmdb_show"] = tm
+                o["tvdb_show"] = tv
                 return o
-            kd={"overlays":{"returning_series":mk(ov_text,dated_tmdb,dated_tvdb)}}
-            kd["overlays"]["returning_series_tba"]=mk(tba_text,undated_tmdb,undated_tvdb)
-            try:
-                os.makedirs(os.path.dirname(overlay_output_path),exist_ok=True)
-                with open(overlay_output_path,"w",encoding="utf-8") as f:
-                    yaml.dump(kd,f,sort_keys=False,indent=2,allow_unicode=True)
-                logging.info(f"Wrote overlay YAML to {overlay_output_path}")
-            except Exception as e:
-                logging.error(f"Failed to write YAML: {e}")
+
+            def mk_backdrop(style, tm, tv):
+                bd_color = style.get("backdrop_color")
+                if not bd_color:
+                    return None
+                o = {"overlay": {
+                    "name": "backdrop",
+                    "back_color": bd_color,
+                    "back_height": style.get("backdrop_height", 90),
+                    "back_width": style.get("backdrop_width", 950),
+                    "horizontal_align": style.get("horizontal_align", "center"),
+                    "horizontal_offset": style.get("horizontal_offset", 0),
+                    "vertical_align": style.get("vertical_align", "bottom"),
+                    "vertical_offset": style.get("backdrop_vertical_offset", 20),
+                    "group": style.get("backdrop_group", "TSSK_backdrop"),
+                    "weight": style.get("backdrop_weight", 12),
+                }}
+                o["tmdb_show"] = tm
+                o["tvdb_show"] = tv
+                return o
+
+            # ALL stubs (0 eps, dated or undated) get the secondary "NO EPISODES YET" strip
+            # in TSSK_stub group at the higher vertical position.
+            all_stub_tmdb = dedup(dated_tmdb + undated_tmdb)
+            all_stub_tvdb = dedup(dated_tvdb + undated_tvdb)
+
+            # TBA (bottom strip, TSSK_text group) applies to TWO cases:
+            #   - Undated stubs (0 eps, no date)  → pairs with NO EPISODES YET strip above
+            #   - Shows with real eps but no date → stands alone, beats TSSK RETURNING (wt 10)
+            # Dated stubs are excluded: the date overlay (weight 15) occupies that slot instead.
+            tba_tmdb = dedup(undated_tmdb + with_eps_tba_tmdb)
+            tba_tvdb = dedup(undated_tvdb + with_eps_tba_tvdb)
+
+            kd = {"overlays": {}}
+
+            # Build entries only for non-empty show lists
+            entries = []
+            if all_stub_tmdb or all_stub_tvdb:
+                # Secondary strip: "NO EPISODES YET" at offset 160 in its own group.
+                # Renders additively alongside the bottom label (TBA or date) from the other group.
+                entries.append(("returning_series_stub", ov_text,  fs_stub, all_stub_tmdb, all_stub_tvdb))
+            if tba_tmdb or tba_tvdb:
+                entries.append(("returning_series_tba",  tba_text, fs_tba,  tba_tmdb,      tba_tvdb))
+
+            for key, text, style, tm, tv in entries:
+                bd = mk_backdrop(style, tm, tv)
+                if bd:
+                    kd["overlays"][f"backdrop_{key}"] = bd
+                kd["overlays"][key] = mk_text(text, style, tm, tv)
+
+            if dry_run:
+                logging.info(f"[DRY RUN] Would write {len(kd['overlays'])} overlay entries to {overlay_output_path}")
+            else:
+                try:
+                    os.makedirs(os.path.dirname(overlay_output_path), exist_ok=True)
+                    with open(overlay_output_path, "w", encoding="utf-8") as f:
+                        yaml.dump(kd, f, sort_keys=False, indent=2, allow_unicode=True)
+                    logging.info(f"Wrote overlay YAML to {overlay_output_path}")
+                except Exception as e:
+                    logging.error(f"Failed to write YAML: {e}")
 
     if generate_date_overlay:
         generate_returning_date_overlays(sonarr_instances, date_overlay_cfg, dry_run)

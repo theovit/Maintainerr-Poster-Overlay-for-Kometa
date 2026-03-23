@@ -11,15 +11,18 @@ BASE_DIR=$(cd "$(dirname "$0")" && pwd)
 # Config cache — used as fallback when python3/PyYAML unavailable (e.g. Arr Docker containers)
 CONFIG_CACHE="$BASE_DIR/tmp/trigger_config.cache"
 
-# Resolve python3 — probe known locations for stripped PATH environments (Sonarr/Radarr Docker)
+# Resolve python3 — probe known locations for stripped PATH environments (Sonarr/Radarr)
+# Direct versioned binaries are probed first; shims require pyenv in PATH to resolve correctly.
 PYTHON3_BIN=$(command -v python3 2>/dev/null)
 if [ -z "$PYTHON3_BIN" ]; then
     for _p in \
+        /home/northmainave/.pyenv/versions/3.*/bin/python3 \
+        /home32/northmainave/.pyenv/versions/3.*/bin/python3 \
+        /home/northmainave/.pyenv/shims/python3 \
+        /home32/northmainave/.pyenv/shims/python3 \
         /lsiopy/bin/python3 \
         /usr/bin/python3 \
         /usr/local/bin/python3 \
-        /home/northmainave/.pyenv/shims/python3 \
-        /home/northmainave/.pyenv/versions/3.*/bin/python3 \
         /usr/bin/python3.9 \
         /usr/bin/python; do
         for _ep in $_p; do
@@ -125,11 +128,36 @@ else
     exit 1
 fi
 
+# Safety defaults — protect arithmetic and file ops if any var is still empty after config load
+: "${WAIT_TIME:=300}"
+: "${LOCK_FILE:=/tmp/kometa_sync.lock}"
+: "${TIMER_FILE:=/tmp/kometa_sync.timer}"
+: "${LOG_FILE:=/tmp/kometa_sync_wrapper.log}"
+
+# If PYTHON_CMD points to a pyenv shim, replace it with the direct versioned binary so it
+# works reliably in stripped environments (Sonarr/Radarr) without needing pyenv in PATH.
+_PYTHON_EXE="${PYTHON_CMD%% *}"   # strip any flags (e.g. " -u")
+_PYTHON_FLAGS="${PYTHON_CMD#"$_PYTHON_EXE"}"
+if [[ "$_PYTHON_EXE" == *pyenv/shims/* ]] || [[ "$_PYTHON_EXE" == "python3" ]]; then
+    for _vp in \
+        /home/northmainave/.pyenv/versions/3.*/bin/python3 \
+        /home32/northmainave/.pyenv/versions/3.*/bin/python3; do
+        for _vep in $_vp; do
+            if [ -x "$_vep" ]; then
+                PYTHON_CMD="$_vep$_PYTHON_FLAGS"
+                break 2
+            fi
+        done
+    done
+fi
+unset _PYTHON_EXE _PYTHON_FLAGS _vp _vep
+
 # =======================================================
 # 2. SYSTEM PREP
 # =======================================================
 ensure_file_dir() {
     file_path="$1"
+    [ -z "$file_path" ] && return 0   # skip if config failed to populate the variable
     dir_name=$(dirname "$file_path")
     if [ ! -d "$dir_name" ]; then mkdir -p "$dir_name"; chmod 777 "$dir_name" 2>/dev/null; fi
     if [ ! -f "$file_path" ]; then touch "$file_path"; fi

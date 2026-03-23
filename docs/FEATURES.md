@@ -17,13 +17,16 @@
 - [stable] Adds `series-returning-lock` Plex label to stub shows
 - [stable] Marks stub episode as watched in Plex so it doesn't appear in "Continue Watching"
 - [stable] Cleans up stub files and removes Plex label when real media is detected
-- [stable] Re-monitors series and all episodes in Sonarr when first real episode appears (so you can rewatch from the beginning)
-- [stable] Generates `returning_overlays.yaml` — `NO EPISODES YET` overlay for shows with zero episode files
-- [stable] Generates `returning_dates_overlays.yaml` — `RETURNS APR 20` style overlay for shows with a known `nextAiring` date in Sonarr
-- [stable] Generates `returning_tba_overlays.yaml` — `TBA` overlay for continuing shows with no known air date
-- [stable] Date overlays slot into TSSK's overlay group at higher weight — automatically overrides generic "RETURNING" text for shows with a known date
+- [stable] Re-monitors all episodes in Sonarr when first real file appears (`remonitor_on_first_episode`)
 - [stable] Path mapping support for remote Sonarr / local script setups
 - [stable] Multi-instance Sonarr support
+- [stable] Three-bucket show classification: `dated` stubs / `undated` stubs / `with_eps_tba` (has files, no air date)
+- [stable] Dual additive overlay strips via separate Kometa groups: "NO EPISODES YET" (`TSSK_stub`) stacks above primary label (`TSSK_text`) without conflict
+- [stable] "T B A" overlay in `TSSK_text` group: applied to undated stubs and shows with real eps but no return date; beats TSSK "RETURNING" (weight 12 vs 10)
+- [stable] `date_overlay` — generates `returning_dates_overlays.yaml` with per-date "RETURNS {date}" labels for shows with a known `nextAiring` in Sonarr; uses `TSSK_text` group at configurable weight
+- [stable] Configurable backdrop overlays (separate Kometa entry per strip) for clean full-width band backgrounds without blocky text-box look
+- [stable] `tba_style` config key: full style override for TBA bottom strip (group, weight, backdrop, font)
+- [stable] All text overlay `vertical_offset` values use formula `backdrop_vertical_offset + backdrop_height/2 - font_size/2 + 5` for visually centered text (font baseline nudge)
 
 ## Asset Grabber
 - [stable] Connects to Plex and downloads posters for all items in configured libraries

@@ -1,6 +1,15 @@
 # Changelog
 
 ## [Unreleased]
+### Changed
+- `returning_series_manager.py`: overlay logic is now fully additive. All stubs (0 eps) get a "NO EPISODES YET" secondary strip (`TSSK_stub` group, vertical_offset 145, independent of TSSK_text). Undated stubs additionally receive "T B A" at vertical_offset 35 in `TSSK_text` (pairing with NO EPISODES YET above it). Dated stubs pair with "RETURNS DATE" from the date overlay. Shows with real episodes and no air date get "T B A" alone. The old blocky text-box background (`back_color`/`back_radius`/`back_padding`) is removed from text overlays; background is now rendered exclusively via the separate backdrop overlay.
+- Visual centering nudge (+5px): all text `vertical_offset` values corrected for font baseline rendering (`tba_style`: 30→35, `overlay_style`: 140→145, `date_overlay`: 50→55). TBA, NO EPISODES YET, and RETURNS DATE now share identical baseline math: `backdrop_vertical_offset + backdrop_height/2 - font_size/2 + 5`.
+### Added
+- `tba_style` config key: full style definition for the TBA bottom strip — group, weight, TSSK-matching backdrop (#001f3f), orange font (#ff9000), and vertical_offset 35.
+- `overlay_style` is now the canonical definition for the NO EPISODES YET secondary strip (TSSK_stub group, vertical_offset 145). `stub_dated_overlay_style` is no longer needed and has been removed from config.
+- `date_overlay` config section: generates `returning_dates_overlays.yaml` with per-date "RETURNS {date}" entries for shows with a known `nextAiring` in Sonarr; uses `TSSK_text` group at configurable weight (default 15, beats TSSK RETURNING at 10).
+- `remonitor_on_first_episode`: when first real episode file appears during cleanup, all episodes in the series are re-monitored in Sonarr.
+- `with_eps_tba` bucket: shows with real episodes but no known next air date are now tracked separately and receive the TBA overlay (superseding TSSK's generic "RETURNING" label).
 
 ## [0.7.0] — 2026-03-17
 ### Added
